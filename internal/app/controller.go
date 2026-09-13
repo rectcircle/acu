@@ -88,10 +88,10 @@ func (c *Controller) enable(timeoutSeconds int) {
 
 	if failures := macos.Preflight(true); failures != 0 {
 		macos.SetMenuState("启动失败")
-		macos.ShowAlert(
+		macos.ShowPreflightAlert(
 			"无法开启模拟锁屏",
 			preflightMessage(failures),
-			false,
+			failures,
 		)
 		return
 	}
@@ -105,10 +105,10 @@ func (c *Controller) upgradeToProtection(timeoutSeconds int) {
 	macos.SetMenuState("正在预检模拟锁屏")
 	if failures := macos.Preflight(true); failures != 0 {
 		macos.SetMenuState("仅防锁屏运行中")
-		macos.ShowAlert(
+		macos.ShowPreflightAlert(
 			"无法开启模拟锁屏",
 			preflightMessage(failures),
-			false,
+			failures,
 		)
 		return
 	}
@@ -166,10 +166,10 @@ func (c *Controller) toggleKeepAwake() {
 	macos.SetMenuState("正在预检防锁屏")
 	if failures := macos.PreflightKeepAwake(true); failures != 0 {
 		macos.SetMenuState("启动失败")
-		macos.ShowAlert(
+		macos.ShowPreflightAlert(
 			"无法开启防锁屏",
 			preflightMessage(failures),
-			false,
+			failures,
 		)
 		return
 	}
@@ -217,7 +217,7 @@ func (c *Controller) showDiagnostics() {
 	policy := policyDescription()
 	message := fmt.Sprintf("技术预检：%s\n企业策略：%s",
 		preflightSummary(failures), policy)
-	macos.ShowAlert("ACU Helper 诊断", message, false)
+	macos.ShowPreflightAlert("ACU Helper 诊断", message, failures)
 }
 
 func (c *Controller) handleChildEvent(event childEvent) {
@@ -440,10 +440,12 @@ func preflightSummary(failures macos.PreflightFailures) string {
 	if failures&macos.FailureAccessibility != 0 {
 		problems = append(problems, "未授予辅助功能权限")
 	}
-	if failures&macos.FailureListenEvents != 0 {
+	if failures&macos.FailureListenEvents != 0 &&
+		failures&macos.FailureAccessibility == 0 {
 		problems = append(problems, "无法监听输入事件")
 	}
-	if failures&macos.FailurePostEvents != 0 {
+	if failures&macos.FailurePostEvents != 0 &&
+		failures&macos.FailureAccessibility == 0 {
 		problems = append(problems, "无法投递合成事件")
 	}
 	if failures&macos.FailureAuth != 0 {

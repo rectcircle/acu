@@ -27,6 +27,9 @@ void acu_stop_app(void);
 void acu_set_menu_state(const char *state);
 void acu_set_keep_awake_active(int active);
 int acu_show_alert(const char *title, const char *message, int confirm);
+void acu_show_preflight_alert(const char *title,
+                              const char *message,
+                              uint32_t failures);
 
 int acu_preflight(int request_permissions);
 int acu_preflight_keep_awake(int request_permissions);

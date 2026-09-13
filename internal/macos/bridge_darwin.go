@@ -122,6 +122,22 @@ func ShowAlert(title, message string, confirm bool) bool {
 	return C.acu_show_alert(cTitle, cMessage, needsConfirm) != 0
 }
 
+func ShowPreflightAlert(
+	title, message string,
+	failures PreflightFailures,
+) {
+	cTitle := C.CString(title)
+	cMessage := C.CString(message)
+	defer C.free(unsafe.Pointer(cTitle))
+	defer C.free(unsafe.Pointer(cMessage))
+
+	C.acu_show_preflight_alert(
+		cTitle,
+		cMessage,
+		C.uint32_t(failures),
+	)
+}
+
 func Preflight(requestPermissions bool) PreflightFailures {
 	var request C.int
 	if requestPermissions {

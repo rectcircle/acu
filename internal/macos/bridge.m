@@ -21,6 +21,7 @@ static id gMenuTarget;
 static id gScreenObserver;
 static int gShieldCountdown = -1;
 static BOOL gInputGuardFailureVisible;
+static NSTimer *gPermissionPollTimer;
 
 static const NSInteger ACUShieldStatusTag = 1001;
 static NSString *const ACUHotKeyPreferenceKey = @"ACUGlobalHotKeyPreset";
@@ -369,6 +370,126 @@ int acu_show_alert(const char *title, const char *message, int confirm) {
     return response == NSAlertFirstButtonReturn;
 }
 
+static BOOL permission_granted(uint32_t permission) {
+    if (permission == ACU_PREFLIGHT_ACCESSIBILITY) {
+        return AXIsProcessTrusted();
+    }
+    if (permission == ACU_PREFLIGHT_LISTEN_EVENTS) {
+        return CGPreflightListenEventAccess();
+    }
+    return NO;
+}
+
+static void restart_application(void) {
+    NSTask *task = [NSTask new];
+    task.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
+    task.arguments = @[
+      @"-c",
+      @"while kill -0 \"$1\" 2>/dev/null; do sleep 0.1; done; exec /usr/bin/open \"$2\"",
+      @"acu-helper-restart",
+      [NSString stringWithFormat:@"%d", getpid()],
+      [NSBundle mainBundle].bundlePath,
+    ];
+    task.standardInput = [NSFileHandle fileHandleWithNullDevice];
+    task.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    task.standardError = [NSFileHandle fileHandleWithNullDevice];
+
+    NSError *error = nil;
+    if ([task launchAndReturnError:&error]) {
+        [NSApp terminate:nil];
+        return;
+    }
+
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = @"无法重新启动 ACU Helper";
+    alert.informativeText = error.localizedDescription;
+    [alert addButtonWithTitle:@"确定"];
+    [alert runModal];
+}
+
+static void monitor_permission_until_granted(uint32_t permission) {
+    [gPermissionPollTimer invalidate];
+    gPermissionPollTimer =
+        [NSTimer scheduledTimerWithTimeInterval:0.5
+                                         repeats:YES
+                                           block:^(NSTimer *timer) {
+      if (!permission_granted(permission)) {
+          return;
+      }
+      [timer invalidate];
+      gPermissionPollTimer = nil;
+      [NSApp activateIgnoringOtherApps:YES];
+
+      NSAlert *alert = [NSAlert new];
+      alert.messageText = @"权限已启用";
+      alert.informativeText =
+          @"需要重新启动 ACU Helper 才能可靠应用新的系统权限。";
+      [alert addButtonWithTitle:@"立即重启"];
+      [alert addButtonWithTitle:@"稍后"];
+      if ([alert runModal] == NSAlertFirstButtonReturn) {
+          restart_application();
+      }
+    }];
+}
+
+void acu_show_preflight_alert(const char *title,
+                              const char *message,
+                              uint32_t failures) {
+    if (title == NULL || message == NULL) {
+        return;
+    }
+    NSString *alertTitle = [NSString stringWithUTF8String:title];
+    NSString *alertMessage = [NSString stringWithUTF8String:message];
+    BOOL needsAccessibility =
+        (failures &
+         (ACU_PREFLIGHT_ACCESSIBILITY | ACU_PREFLIGHT_POST_EVENTS)) != 0;
+    BOOL needsListenEvents =
+        !needsAccessibility &&
+        (failures & ACU_PREFLIGHT_LISTEN_EVENTS) != 0;
+
+    on_main_sync(^{
+      NSAlert *alert = [NSAlert new];
+      alert.messageText = alertTitle;
+      if (needsAccessibility || needsListenEvents) {
+          alert.informativeText = [alertMessage stringByAppendingString:
+              @"\n\n操作步骤：\n"
+               "1. 在打开的系统设置页面中启用“ACU Helper”。\n"
+               "2. 检测到授权后，按提示立即重启 ACU Helper。"];
+      } else {
+          alert.informativeText = alertMessage;
+      }
+
+      NSMutableArray<NSURL *> *settingsURLs = [NSMutableArray new];
+      NSMutableArray<NSNumber *> *permissions = [NSMutableArray new];
+      if (needsAccessibility) {
+          [alert addButtonWithTitle:@"打开辅助功能设置"];
+          [settingsURLs addObject:[NSURL URLWithString:
+              @"x-apple.systempreferences:com.apple.preference.security?"
+               "Privacy_Accessibility"]];
+          [permissions addObject:@(ACU_PREFLIGHT_ACCESSIBILITY)];
+      }
+      if (needsListenEvents) {
+          [alert addButtonWithTitle:@"打开输入监控设置"];
+          [settingsURLs addObject:[NSURL URLWithString:
+              @"x-apple.systempreferences:com.apple.preference.security?"
+               "Privacy_ListenEvent"]];
+          [permissions addObject:@(ACU_PREFLIGHT_LISTEN_EVENTS)];
+      }
+      [alert addButtonWithTitle:
+          settingsURLs.count == 0 ? @"确定" : @"稍后"];
+
+      NSInteger response = [alert runModal];
+      NSInteger selectedIndex = response - NSAlertFirstButtonReturn;
+      if (selectedIndex >= 0 &&
+          selectedIndex < (NSInteger)settingsURLs.count) {
+          [[NSWorkspace sharedWorkspace]
+              openURL:settingsURLs[(NSUInteger)selectedIndex]];
+          monitor_permission_until_granted(
+              permissions[(NSUInteger)selectedIndex].unsignedIntValue);
+      }
+    });
+}
+
 static BOOL preference_forced(CFStringRef key, CFStringRef domain) {
     return CFPreferencesAppValueIsForced(key, domain);
 }
@@ -402,20 +523,23 @@ int acu_preflight(int request_permissions) {
     int failures = 0;
     NSDictionary *options =
         @{(__bridge NSString *)kAXTrustedCheckOptionPrompt : @(request_permissions != 0)};
-    if (!AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options)) {
+    BOOL accessibilityTrusted =
+        AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
+    if (!accessibilityTrusted) {
         failures |= ACU_PREFLIGHT_ACCESSIBILITY;
-    }
-    if (!CGPreflightListenEventAccess()) {
-        if (request_permissions) {
-            CGRequestListenEventAccess();
+    } else {
+        if (!CGPreflightListenEventAccess()) {
+            if (request_permissions) {
+                CGRequestListenEventAccess();
+            }
+            failures |= ACU_PREFLIGHT_LISTEN_EVENTS;
         }
-        failures |= ACU_PREFLIGHT_LISTEN_EVENTS;
-    }
-    if (!CGPreflightPostEventAccess()) {
-        if (request_permissions) {
-            CGRequestPostEventAccess();
+        if (!CGPreflightPostEventAccess()) {
+            if (request_permissions) {
+                CGRequestPostEventAccess();
+            }
+            failures |= ACU_PREFLIGHT_POST_EVENTS;
         }
-        failures |= ACU_PREFLIGHT_POST_EVENTS;
     }
 
     LAContext *context = [LAContext new];
@@ -436,10 +560,11 @@ int acu_preflight_keep_awake(int request_permissions) {
     int failures = 0;
     NSDictionary *options =
         @{(__bridge NSString *)kAXTrustedCheckOptionPrompt : @(request_permissions != 0)};
-    if (!AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options)) {
+    BOOL accessibilityTrusted =
+        AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options);
+    if (!accessibilityTrusted) {
         failures |= ACU_PREFLIGHT_ACCESSIBILITY;
-    }
-    if (!CGPreflightPostEventAccess()) {
+    } else if (!CGPreflightPostEventAccess()) {
         if (request_permissions) {
             CGRequestPostEventAccess();
         }
