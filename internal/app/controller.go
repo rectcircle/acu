@@ -103,6 +103,10 @@ func (c *Controller) pollLidAutomation(now time.Time) {
 	if !c.lidAutomation.enabled {
 		return
 	}
+	if macos.SessionLocked() {
+		c.lidAutomation.suppressUntilReopened()
+		return
+	}
 	angle, ok := macos.ReadLidAngle()
 	if !ok {
 		return

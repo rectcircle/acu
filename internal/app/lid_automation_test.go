@@ -13,7 +13,7 @@ func TestLidAutomationProtectsAfterDebounceAndAuthenticatesOnOpen(t *testing.T) 
 		t.Fatalf("unexpected initial action: %v", action)
 	}
 	if action := automation.observe(
-		start.Add(lidTriggerDelay-time.Millisecond),
+		start.Add(lidStableDelay-time.Millisecond),
 		40,
 		false,
 		true,
@@ -22,7 +22,7 @@ func TestLidAutomationProtectsAfterDebounceAndAuthenticatesOnOpen(t *testing.T) 
 		t.Fatalf("triggered before debounce elapsed: %v", action)
 	}
 	if action := automation.observe(
-		start.Add(lidTriggerDelay),
+		start.Add(lidStableDelay),
 		40,
 		false,
 		true,
@@ -92,7 +92,7 @@ func TestLidAutomationDoesNotTriggerWhileLidIsStillMovingClosed(t *testing.T) {
 
 	for index, angle := range []float64{40, 30, 20} {
 		action := automation.observe(
-			start.Add(time.Duration(index)*lidTriggerDelay),
+			start.Add(time.Duration(index)*lidStableDelay),
 			angle,
 			false,
 			true,
@@ -103,7 +103,7 @@ func TestLidAutomationDoesNotTriggerWhileLidIsStillMovingClosed(t *testing.T) {
 		}
 	}
 	if action := automation.observe(
-		start.Add(3*lidTriggerDelay),
+		start.Add(3*lidStableDelay),
 		1,
 		true,
 		true,
@@ -119,7 +119,7 @@ func TestLidAutomationDoesNotOwnExistingManualProtection(t *testing.T) {
 
 	automation.observe(start, 30, false, false, true)
 	if action := automation.observe(
-		start.Add(lidTriggerDelay),
+		start.Add(lidStableDelay),
 		30,
 		false,
 		false,
@@ -144,7 +144,7 @@ func TestLidAutomationRequiresReopenBeforeRetrigger(t *testing.T) {
 
 	automation.observe(start, 40, false, true, false)
 	if action := automation.observe(
-		start.Add(lidTriggerDelay),
+		start.Add(lidStableDelay),
 		40,
 		false,
 		true,
@@ -166,12 +166,59 @@ func TestLidAutomationRequiresReopenBeforeRetrigger(t *testing.T) {
 	automation.observe(start.Add(4*time.Second), 55, false, true, false)
 	automation.observe(start.Add(5*time.Second), 40, false, true, false)
 	if action := automation.observe(
-		start.Add(5*time.Second+lidTriggerDelay),
+		start.Add(5*time.Second+lidStableDelay),
 		40,
 		false,
 		true,
 		false,
 	); action != lidActionProtect {
 		t.Fatalf("expected protection after reopen, got %v", action)
+	}
+}
+
+func TestLidAutomationSuppressesLockedSessionUntilFullyReopened(t *testing.T) {
+	automation := newLidAutomation(true, 45)
+	start := time.Unix(500, 0)
+
+	automation.observe(start, 30, false, true, false)
+	automation.suppressUntilReopened()
+
+	if action := automation.observe(
+		start.Add(3*time.Second),
+		30,
+		false,
+		true,
+		false,
+	); action != lidActionNone {
+		t.Fatalf("locked close candidate triggered protection: %v", action)
+	}
+	if action := automation.observe(
+		start.Add(4*time.Second),
+		49,
+		false,
+		true,
+		false,
+	); action != lidActionNone {
+		t.Fatalf("partial reopen re-armed protection: %v", action)
+	}
+	if action := automation.observe(
+		start.Add(5*time.Second),
+		50,
+		false,
+		true,
+		false,
+	); action != lidActionNone {
+		t.Fatalf("full reopen should only re-arm: %v", action)
+	}
+
+	automation.observe(start.Add(6*time.Second), 40, false, true, false)
+	if action := automation.observe(
+		start.Add(6*time.Second+lidStableDelay),
+		40,
+		false,
+		true,
+		false,
+	); action != lidActionProtect {
+		t.Fatalf("expected protection after a new close cycle, got %v", action)
 	}
 }

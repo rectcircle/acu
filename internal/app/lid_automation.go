@@ -7,7 +7,7 @@ import (
 
 const (
 	lidPollInterval       = 250 * time.Millisecond
-	lidTriggerDelay       = time.Second
+	lidStableDelay        = 2 * time.Second
 	lidOpenHysteresis     = 5.0
 	lidFullyClosedMaximum = 2.0
 	lidMovementThreshold  = 0.5
@@ -96,7 +96,7 @@ func (a *lidAutomation) observe(
 		a.belowSince = now
 		return lidActionNone
 	}
-	if now.Sub(a.belowSince) < lidTriggerDelay {
+	if now.Sub(a.belowSince) < lidStableDelay {
 		return lidActionNone
 	}
 
@@ -107,6 +107,13 @@ func (a *lidAutomation) observe(
 	}
 	a.protectionOwned = true
 	return lidActionProtect
+}
+
+func (a *lidAutomation) suppressUntilReopened() {
+	a.belowSince = time.Time{}
+	a.armed = false
+	a.suppressUntilOpen = true
+	a.authRequested = false
 }
 
 func (a *lidAutomation) protectionFailed() {

@@ -303,7 +303,7 @@ IOKit HID 匹配 Apple `VendorID=0x05ac`、`ProductID=0x8104`、
 自动化状态机与 Guardian 保护状态机分离，规则如下：
 
 ```text
-angle < threshold 且稳定 1s（角度变化时重新计时）
+angle < threshold 且稳定停留 2s（角度变化时重新计时）
   └─ 当前无保护或仅防锁屏运行中 -> 开启完整模拟锁屏
 
 angle >= threshold + 5° 且保护由半合盖触发
@@ -311,6 +311,9 @@ angle >= threshold + 5° 且保护由半合盖触发
 
 angle <= 2° 且存在在线外接显示器
   └─ 抑制当前开合周期，直到重新展开后再 armed
+
+system session locked
+  └─ 取消当前候选，直到重新完全展开后再 armed
 ```
 
 `protectionOwned` 只在半合盖状态机实际请求保护时设置。手动菜单、快捷键和测试模式启动的
