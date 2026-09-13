@@ -46,6 +46,7 @@ Go 负责：
 - CGEvent 鼠标移动；
 - LocalAuthentication；
 - 会话锁定状态；
+- IOKit HID 铰链角度和外接显示器状态；
 - managed preference 检测。
 
 不建议 MVP 使用 `robotgo`：
@@ -291,6 +292,35 @@ Guardian 握手模式为 `keep_awake` 时，不创建 Event Tap、Shield Window 
 从该模式开启模拟锁屏时，Controller 先在 Idle Keeper 继续运行的情况下执行完整保护预检。
 预检失败则保持 `keep_awake`；预检成功后记录待启动的保护模式，向当前 Guardian 发送
 `stop`，收到 `disabled` 后再启动 `protection` Guardian。两个 Guardian 不并行运行。
+
+### 6.5 半合盖自动保护
+
+Controller 每 250 ms 通过 Native Bridge 读取一次内置铰链角度传感器。Bridge 使用
+IOKit HID 匹配 Apple `VendorID=0x05ac`、`ProductID=0x8104`、
+`UsagePage=0x0020`、`Usage=0x008a`，读取 feature report `1`，不执行外部命令。
+如果 report `1` 不可用则尝试 report `0`；传感器发现或读取失败时不产生状态转换。
+
+自动化状态机与 Guardian 保护状态机分离，规则如下：
+
+```text
+angle < threshold 且稳定 1s（角度变化时重新计时）
+  └─ 当前无保护或仅防锁屏运行中 -> 开启完整模拟锁屏
+
+angle >= threshold + 5° 且保护由半合盖触发
+  └─ 发送 request_auth -> Guardian 打开 LocalAuthentication
+
+angle <= 2° 且存在在线外接显示器
+  └─ 抑制当前开合周期，直到重新展开后再 armed
+```
+
+`protectionOwned` 只在半合盖状态机实际请求保护时设置。手动菜单、快捷键和测试模式启动的
+保护不会在展开时自动认证。认证取消后保持保护；必须再次低于阈值并重新展开才会再次自动
+发起认证。
+
+菜单配置使用 `NSUserDefaults` 持久化，未保存开关配置时默认开启，用户关闭后持久化
+该选择；阈值默认 `45°`，可选
+`30°/45°/60°`。诊断面板显示当前原始角度，便于确认机型支持情况。该 HID report 的
+设备标识和数据布局属于机型相关约定，需要在系统升级和新硬件上回归。
 
 ## 7. 模拟锁屏保护层
 
@@ -683,8 +713,10 @@ cgo 链接：
 ```text
 -framework AppKit
 -framework ApplicationServices
+-framework Carbon
 -framework CoreGraphics
 -framework CoreFoundation
+-framework IOKit
 -framework LocalAuthentication
 -framework Security
 ```
@@ -731,6 +763,7 @@ cgo 链接：
 - controller EOF 后 Guardian 保持策略。
 - policy decision 合并。
 - trusted PID 启动时间和 PID 复用检测。
+- 半合盖防抖、展开迟滞、手动保护隔离和闭盖外接屏抑制。
 
 ### 17.2 Native 测试
 
@@ -740,6 +773,7 @@ cgo 链接：
 - LocalAuthentication success/cancel/lockout。
 - `CFPreferencesAppValueIsForced` fixture。
 - 锁屏状态识别。
+- 铰链传感器发现、报告读取和外接显示器识别。
 
 ### 17.3 E2E
 
@@ -758,6 +792,7 @@ cgo 链接：
 11. 权限诊断可展示设备纳管和策略检测失败状态。
 12. 认证面板打开时，物理输入和自动化客户端合成输入不会写入底层应用。
 13. 全局快捷键默认值、预设切换、持久化、关闭和保护态幂等行为。
+14. 半合盖触发、展开认证、快速开合防抖和完全合盖外接显示器抑制。
 
 ## 18. 实施阶段
 
@@ -793,3 +828,4 @@ cgo 链接：
 4. 使用轻微鼠标活动，不永久修改系统电源/锁屏设置。
 5. 使用双进程，让 Guardian 在 controller 故障后仍可认证退出。
 6. 企业策略检测只用于权限诊断，不弹窗、不阻断功能；不修改或规避 MDM 配置。
+7. 半合盖仅自动开启模拟保护，展开仅自动发起系统认证，不绕过认证。

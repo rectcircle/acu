@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/rectcircle/acu-helper/internal/ipc"
 	"github.com/rectcircle/acu-helper/internal/macos"
@@ -41,19 +42,29 @@ type Controller struct {
 	quitWhenDisabled         bool
 	pendingProtection        bool
 	pendingProtectionTimeout int
+	lidAutomation            *lidAutomation
 }
 
 func Run() error {
 	if err := macos.InitMenu(); err != nil {
 		return err
 	}
-	controller := &Controller{childEvents: make(chan childEvent, 16)}
+	lidConfig := macos.CurrentLidAutomationConfig()
+	controller := &Controller{
+		childEvents: make(chan childEvent, 16),
+		lidAutomation: newLidAutomation(
+			lidConfig.Enabled,
+			lidConfig.ThresholdAngle,
+		),
+	}
 	go controller.loop()
 	macos.RunApp()
 	return nil
 }
 
 func (c *Controller) loop() {
+	lidTicker := time.NewTicker(lidPollInterval)
+	defer lidTicker.Stop()
 	for {
 		select {
 		case action := <-macos.MenuEvents():
@@ -68,12 +79,65 @@ func (c *Controller) loop() {
 				c.requestAuthentication()
 			case macos.MenuDiagnostics:
 				c.showDiagnostics()
+			case macos.MenuLidConfig:
+				config := macos.CurrentLidAutomationConfig()
+				c.lidAutomation.configure(
+					config.Enabled,
+					config.ThresholdAngle,
+				)
+				if config.Enabled {
+					c.checkLidAutomationPreflight()
+				}
 			case macos.MenuQuit:
 				c.quit()
 			}
 		case event := <-c.childEvents:
 			c.handleChildEvent(event)
+		case now := <-lidTicker.C:
+			c.pollLidAutomation(now)
 		}
+	}
+}
+
+func (c *Controller) pollLidAutomation(now time.Time) {
+	if !c.lidAutomation.enabled {
+		return
+	}
+	angle, ok := macos.ReadLidAngle()
+	if !ok {
+		return
+	}
+	hasExternalDisplay :=
+		angle <= lidFullyClosedMaximum && macos.HasExternalDisplay()
+	canProtect := c.child == nil ||
+		(c.child.mode == guardianModeKeepAwake && !c.pendingProtection)
+	protectionActive :=
+		c.child != nil && c.child.mode == guardianModeProtection
+
+	switch c.lidAutomation.observe(
+		now,
+		angle,
+		hasExternalDisplay,
+		canProtect,
+		protectionActive,
+	) {
+	case lidActionProtect:
+		c.enable(0)
+		if c.child == nil && !c.pendingProtection {
+			c.lidAutomation.protectionFailed()
+		}
+	case lidActionAuthenticate:
+		c.requestAuthentication()
+	}
+}
+
+func (c *Controller) checkLidAutomationPreflight() {
+	if failures := macos.Preflight(true); failures != 0 {
+		macos.ShowPreflightAlert(
+			"半合盖自动保护尚未就绪",
+			preflightMessage(failures),
+			failures,
+		)
 	}
 }
 
@@ -215,9 +279,21 @@ func (c *Controller) quit() {
 func (c *Controller) showDiagnostics() {
 	failures := macos.Preflight(false)
 	policy := policyDescription()
-	message := fmt.Sprintf("技术预检：%s\n企业策略：%s",
-		preflightSummary(failures), policy)
+	message := fmt.Sprintf(
+		"技术预检：%s\n企业策略：%s\n铰链传感器：%s",
+		preflightSummary(failures),
+		policy,
+		lidSensorDescription(),
+	)
 	macos.ShowPreflightAlert("ACU Helper 诊断", message, failures)
+}
+
+func lidSensorDescription() string {
+	angle, ok := macos.ReadLidAngle()
+	if !ok {
+		return "不可用"
+	}
+	return fmt.Sprintf("%.0f°", angle)
 }
 
 func (c *Controller) handleChildEvent(event childEvent) {
@@ -226,6 +302,9 @@ func (c *Controller) handleChildEvent(event childEvent) {
 	}
 	if event.exited {
 		c.child = nil
+		if event.child.mode == guardianModeProtection {
+			c.lidAutomation.protectionStopped()
+		}
 		if event.child.mode == guardianModeKeepAwake {
 			macos.SetKeepAwakeActive(false)
 		}
@@ -273,6 +352,8 @@ func (c *Controller) handleChildEvent(event childEvent) {
 		if event.message.State == "disabled" {
 			if event.child.mode == guardianModeKeepAwake {
 				macos.SetKeepAwakeActive(false)
+			} else {
+				c.lidAutomation.protectionStopped()
 			}
 			event.child.conn.Close()
 			c.child = nil

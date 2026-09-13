@@ -3,6 +3,7 @@
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
 #import <Carbon/Carbon.h>
+#import <IOKit/hid/IOHIDManager.h>
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <Security/Security.h>
 #import <dispatch/dispatch.h>
@@ -14,6 +15,9 @@ static NSStatusItem *gStatusItem;
 static NSMenuItem *gStateItem;
 static NSMenuItem *gEnableMenuItem;
 static NSMenuItem *gKeepAwakeMenuItem;
+static NSMenuItem *gLidAutomationMenuItem;
+static NSMenuItem *gLidAngleRootItem;
+static NSArray<NSMenuItem *> *gLidAngleMenuItems;
 static NSMenuItem *gHotKeyRootItem;
 static NSArray<NSMenuItem *> *gHotKeyMenuItems;
 static NSMutableArray<NSPanel *> *gShieldWindows;
@@ -22,11 +26,20 @@ static id gScreenObserver;
 static int gShieldCountdown = -1;
 static BOOL gInputGuardFailureVisible;
 static NSTimer *gPermissionPollTimer;
+static IOHIDDeviceRef gLidAngleDevice;
+static IOHIDManagerRef gLidAngleManager;
+static CFIndex gLidAngleReportID = 1;
+static pthread_mutex_t gLidAngleMutex = PTHREAD_MUTEX_INITIALIZER;
+static BOOL gLidAngleInitializationAttempted;
 
 static const NSInteger ACUShieldStatusTag = 1001;
 static NSString *const ACUHotKeyPreferenceKey = @"ACUGlobalHotKeyPreset";
 static NSString *const ACUTrustedTeamIdentifiersKey =
     @"ACUTrustedTeamIdentifiers";
+static NSString *const ACULidAutomationEnabledKey =
+    @"ACULidAutomationEnabled";
+static NSString *const ACULidAngleThresholdKey =
+    @"ACULidAngleThreshold";
 
 static CFMachPortRef gEventTap;
 static CFRunLoopRef gEventRunLoop;
@@ -55,6 +68,10 @@ typedef NS_ENUM(NSInteger, ACUHotKeyPreset) {
 
 static const OSType ACUHotKeySignature = 0x41435548; // ACUH
 static const UInt32 ACUHotKeyIdentifier = 1;
+static const NSInteger ACULidDefaultThreshold = 45;
+
+static BOOL initialize_lid_angle_sensor(void);
+static void update_lid_automation_menu(void);
 
 static void on_main_sync(dispatch_block_t block) {
     if (pthread_main_np()) {
@@ -156,12 +173,131 @@ static void update_hotkey_menu(ACUHotKeyPreset preset, BOOL available) {
                   NSEventModifierFlagCommand;
 }
 
+static NSInteger lid_angle_threshold(void) {
+    NSInteger threshold =
+        [[NSUserDefaults standardUserDefaults]
+            integerForKey:ACULidAngleThresholdKey];
+    if (threshold != 30 && threshold != 45 && threshold != 60) {
+        return ACULidDefaultThreshold;
+    }
+    return threshold;
+}
+
+static BOOL lid_automation_enabled(void) {
+    id stored =
+        [[NSUserDefaults standardUserDefaults]
+            objectForKey:ACULidAutomationEnabledKey];
+    return stored == nil ? YES : [stored boolValue];
+}
+
+static BOOL initialize_lid_angle_sensor(void) {
+    @autoreleasepool {
+        pthread_mutex_lock(&gLidAngleMutex);
+        if (gLidAngleInitializationAttempted) {
+            BOOL available = gLidAngleDevice != NULL;
+            pthread_mutex_unlock(&gLidAngleMutex);
+            return available;
+        }
+        gLidAngleInitializationAttempted = YES;
+
+        IOHIDManagerRef manager =
+            IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+        if (manager == NULL) {
+            pthread_mutex_unlock(&gLidAngleMutex);
+            return NO;
+        }
+        NSDictionary *matching = @{
+          @"VendorID" : @0x05ac,
+          @"ProductID" : @0x8104,
+          @"UsagePage" : @0x0020,
+          @"Usage" : @0x008a,
+        };
+        IOHIDManagerSetDeviceMatching(
+            manager, (__bridge CFDictionaryRef)matching);
+        if (IOHIDManagerOpen(manager, kIOHIDOptionsTypeNone) !=
+            kIOReturnSuccess) {
+            CFRelease(manager);
+            pthread_mutex_unlock(&gLidAngleMutex);
+            return NO;
+        }
+
+        CFSetRef devices = IOHIDManagerCopyDevices(manager);
+        if (devices != NULL) {
+            CFIndex count = CFSetGetCount(devices);
+            const void **values =
+                count > 0 ? calloc((size_t)count, sizeof(*values)) : NULL;
+            if (values != NULL) {
+                CFSetGetValues(devices, values);
+                for (CFIndex index = 0; index < count; index++) {
+                    IOHIDDeviceRef device = (IOHIDDeviceRef)values[index];
+                    if (IOHIDDeviceOpen(device, kIOHIDOptionsTypeNone) !=
+                        kIOReturnSuccess) {
+                        continue;
+                    }
+                    for (CFIndex reportID = 1; reportID >= 0; reportID--) {
+                        uint8_t report[8] = {0};
+                        CFIndex length = sizeof(report);
+                        if (IOHIDDeviceGetReport(device,
+                                                 kIOHIDReportTypeFeature,
+                                                 reportID,
+                                                 report,
+                                                 &length) ==
+                                kIOReturnSuccess &&
+                            length >= 3) {
+                            gLidAngleDevice =
+                                (IOHIDDeviceRef)CFRetain(device);
+                            gLidAngleReportID = reportID;
+                            gLidAngleManager = manager;
+                            break;
+                        }
+                    }
+                    if (gLidAngleDevice != NULL) {
+                        break;
+                    }
+                    IOHIDDeviceClose(device, kIOHIDOptionsTypeNone);
+                }
+                free(values);
+            }
+            CFRelease(devices);
+        }
+
+        if (gLidAngleDevice == NULL) {
+            IOHIDManagerClose(manager, kIOHIDOptionsTypeNone);
+            CFRelease(manager);
+        }
+        BOOL available = gLidAngleDevice != NULL;
+        pthread_mutex_unlock(&gLidAngleMutex);
+        return available;
+    }
+}
+
+static void update_lid_automation_menu(void) {
+    BOOL available = gLidAngleDevice != NULL;
+    BOOL enabled = lid_automation_enabled();
+    NSInteger threshold = lid_angle_threshold();
+
+    gLidAutomationMenuItem.enabled = available;
+    gLidAutomationMenuItem.state =
+        available && enabled ? NSControlStateValueOn
+                             : NSControlStateValueOff;
+    gLidAutomationMenuItem.title =
+        available ? @"半合盖自动保护"
+                  : @"半合盖自动保护（传感器不可用）";
+    gLidAngleRootItem.enabled = available;
+    for (NSMenuItem *item in gLidAngleMenuItems) {
+        item.state = item.tag == threshold ? NSControlStateValueOn
+                                           : NSControlStateValueOff;
+    }
+}
+
 @interface ACUMenuTarget : NSObject
 - (void)enable:(id)sender;
 - (void)toggleKeepAwake:(id)sender;
 - (void)testProtection:(id)sender;
 - (void)unlock:(id)sender;
 - (void)diagnostics:(id)sender;
+- (void)toggleLidAutomation:(id)sender;
+- (void)selectLidAngle:(id)sender;
 - (void)selectHotKey:(id)sender;
 - (void)quit:(id)sender;
 @end
@@ -186,6 +322,25 @@ static void update_hotkey_menu(ACUHotKeyPreset preset, BOOL available) {
 - (void)diagnostics:(id)sender {
     (void)sender;
     acuMenuAction(ACU_MENU_DIAGNOSTICS);
+}
+- (void)toggleLidAutomation:(id)sender {
+    (void)sender;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    BOOL enabled = !lid_automation_enabled();
+    [defaults setBool:enabled forKey:ACULidAutomationEnabledKey];
+    update_lid_automation_menu();
+    acuMenuAction(ACU_MENU_LID_CONFIGURATION);
+}
+- (void)selectLidAngle:(id)sender {
+    NSInteger threshold = [sender tag];
+    if (threshold != 30 && threshold != 45 && threshold != 60) {
+        return;
+    }
+    [[NSUserDefaults standardUserDefaults]
+        setInteger:threshold
+            forKey:ACULidAngleThresholdKey];
+    update_lid_automation_menu();
+    acuMenuAction(ACU_MENU_LID_CONFIGURATION);
 }
 - (void)selectHotKey:(id)sender {
     ACUHotKeyPreset preset = (ACUHotKeyPreset)[sender tag];
@@ -246,6 +401,36 @@ int acu_init_menu(void) {
                                keyEquivalent:@""];
         gKeepAwakeMenuItem.target = gMenuTarget;
         [menu addItem:gKeepAwakeMenuItem];
+
+        gLidAutomationMenuItem =
+            [[NSMenuItem alloc] initWithTitle:@"半合盖自动保护"
+                                      action:@selector(toggleLidAutomation:)
+                               keyEquivalent:@""];
+        gLidAutomationMenuItem.target = gMenuTarget;
+        [menu addItem:gLidAutomationMenuItem];
+
+        gLidAngleRootItem =
+            [[NSMenuItem alloc] initWithTitle:@"半合盖触发角度"
+                                      action:nil
+                               keyEquivalent:@""];
+        NSMenu *lidAngleMenu =
+            [[NSMenu alloc] initWithTitle:@"半合盖触发角度"];
+        NSMutableArray<NSMenuItem *> *lidAngleItems = [NSMutableArray new];
+        for (NSNumber *threshold in @[@30, @45, @60]) {
+            NSMenuItem *item =
+                [[NSMenuItem alloc]
+                    initWithTitle:[NSString stringWithFormat:@"%@°",
+                                                            threshold]
+                          action:@selector(selectLidAngle:)
+                   keyEquivalent:@""];
+            item.target = gMenuTarget;
+            item.tag = threshold.integerValue;
+            [lidAngleMenu addItem:item];
+            [lidAngleItems addObject:item];
+        }
+        gLidAngleMenuItems = lidAngleItems;
+        gLidAngleRootItem.submenu = lidAngleMenu;
+        [menu addItem:gLidAngleRootItem];
 
         NSMenuItem *testProtection =
             [[NSMenuItem alloc] initWithTitle:@"测试模拟锁屏（15 秒自动退出）"
@@ -313,6 +498,8 @@ int acu_init_menu(void) {
         update_hotkey_menu(available ? (ACUHotKeyPreset)storedPreset
                                      : ACUHotKeyPresetDisabled,
                            available);
+        initialize_lid_angle_sensor();
+        update_lid_automation_menu();
         return 1;
     }
 }
@@ -517,6 +704,57 @@ int acu_session_locked(void) {
     }
     CFRelease(session);
     return locked;
+}
+
+int acu_lid_automation_enabled(void) {
+    return lid_automation_enabled() ? 1 : 0;
+}
+
+double acu_lid_angle_threshold(void) {
+    return (double)lid_angle_threshold();
+}
+
+int acu_read_lid_angle(double *angle) {
+    if (angle == NULL) {
+        return 0;
+    }
+    if (!initialize_lid_angle_sensor()) {
+        return 0;
+    }
+
+    pthread_mutex_lock(&gLidAngleMutex);
+    uint8_t report[8] = {0};
+    CFIndex length = sizeof(report);
+    IOReturn result =
+        IOHIDDeviceGetReport(gLidAngleDevice,
+                             kIOHIDReportTypeFeature,
+                             gLidAngleReportID,
+                             report,
+                             &length);
+    BOOL valid = result == kIOReturnSuccess && length >= 3;
+    if (valid) {
+        uint16_t raw = ((uint16_t)report[2] << 8) | report[1];
+        valid = raw <= 180;
+        if (valid) {
+            *angle = (double)raw;
+        }
+    }
+    pthread_mutex_unlock(&gLidAngleMutex);
+    return valid ? 1 : 0;
+}
+
+int acu_has_external_display(void) {
+    CGDirectDisplayID displays[32];
+    uint32_t count = 0;
+    if (CGGetOnlineDisplayList(32, displays, &count) != kCGErrorSuccess) {
+        return 0;
+    }
+    for (uint32_t index = 0; index < count; index++) {
+        if (!CGDisplayIsBuiltin(displays[index])) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int acu_preflight(int request_permissions) {

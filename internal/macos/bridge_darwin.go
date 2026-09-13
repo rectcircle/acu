@@ -4,7 +4,7 @@ package macos
 
 /*
 #cgo CFLAGS: -x objective-c -fblocks -fobjc-arc
-#cgo LDFLAGS: -framework AppKit -framework ApplicationServices -framework Carbon -framework CoreGraphics -framework CoreFoundation -framework LocalAuthentication -framework Security
+#cgo LDFLAGS: -framework AppKit -framework ApplicationServices -framework Carbon -framework CoreGraphics -framework CoreFoundation -framework IOKit -framework LocalAuthentication -framework Security
 #include <stdlib.h>
 #include "bridge.h"
 */
@@ -25,6 +25,7 @@ const (
 	MenuDiagnostics MenuAction = C.ACU_MENU_DIAGNOSTICS
 	MenuQuit        MenuAction = C.ACU_MENU_QUIT
 	MenuKeepAwake   MenuAction = C.ACU_MENU_KEEP_AWAKE
+	MenuLidConfig   MenuAction = C.ACU_MENU_LID_CONFIGURATION
 )
 
 type PreflightFailures uint32
@@ -160,6 +161,30 @@ func ManagedPolicyDetected() bool {
 
 func SessionLocked() bool {
 	return C.acu_session_locked() != 0
+}
+
+type LidAutomationConfig struct {
+	Enabled        bool
+	ThresholdAngle float64
+}
+
+func CurrentLidAutomationConfig() LidAutomationConfig {
+	return LidAutomationConfig{
+		Enabled:        C.acu_lid_automation_enabled() != 0,
+		ThresholdAngle: float64(C.acu_lid_angle_threshold()),
+	}
+}
+
+func ReadLidAngle() (float64, bool) {
+	var angle C.double
+	if C.acu_read_lid_angle(&angle) == 0 {
+		return 0, false
+	}
+	return float64(angle), true
+}
+
+func HasExternalDisplay() bool {
+	return C.acu_has_external_display() != 0
 }
 
 func StartInputGuard(marker uint64) error {

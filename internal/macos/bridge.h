@@ -10,6 +10,7 @@ enum {
     ACU_MENU_DIAGNOSTICS = 4,
     ACU_MENU_QUIT = 5,
     ACU_MENU_KEEP_AWAKE = 6,
+    ACU_MENU_LID_CONFIGURATION = 7,
 };
 
 enum {
@@ -35,6 +36,10 @@ int acu_preflight(int request_permissions);
 int acu_preflight_keep_awake(int request_permissions);
 int acu_managed_policy_status(void);
 int acu_session_locked(void);
+int acu_lid_automation_enabled(void);
+double acu_lid_angle_threshold(void);
+int acu_read_lid_angle(double *angle);
+int acu_has_external_display(void);
 
 int acu_start_input_guard(uint64_t marker);
 void acu_stop_input_guard(void);
