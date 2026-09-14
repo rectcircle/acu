@@ -26,3 +26,41 @@ func TestPreflightSummaryReportsIndependentListenFailure(t *testing.T) {
 		t.Fatalf("unexpected summary: %q", summary)
 	}
 }
+
+func TestShouldRestoreKeepAwakeAfterProtection(t *testing.T) {
+	controller := &Controller{keepAwakeRequested: true}
+
+	if !controller.shouldRestoreKeepAwake() {
+		t.Fatal("keep-awake should resume after protection")
+	}
+}
+
+func TestShouldNotRestoreKeepAwakeWithoutUserRequest(t *testing.T) {
+	controller := &Controller{}
+
+	if controller.shouldRestoreKeepAwake() {
+		t.Fatal("keep-awake resumed without a user request")
+	}
+}
+
+func TestShouldNotRestoreKeepAwakeWhileQuitting(t *testing.T) {
+	controller := &Controller{
+		keepAwakeRequested: true,
+		quitWhenDisabled:   true,
+	}
+
+	if controller.shouldRestoreKeepAwake() {
+		t.Fatal("keep-awake resumed while quitting")
+	}
+}
+
+func TestShouldNotRestoreKeepAwakeDuringTransition(t *testing.T) {
+	controller := &Controller{
+		keepAwakeRequested: true,
+		pendingProtection:  true,
+	}
+
+	if controller.shouldRestoreKeepAwake() {
+		t.Fatal("keep-awake resumed before protection started")
+	}
+}

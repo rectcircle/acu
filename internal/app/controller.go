@@ -40,6 +40,7 @@ type Controller struct {
 	child                    *guardianProcess
 	childEvents              chan childEvent
 	quitWhenDisabled         bool
+	keepAwakeRequested       bool
 	pendingProtection        bool
 	pendingProtectionTimeout int
 	lidAutomation            *lidAutomation
@@ -201,6 +202,7 @@ func (c *Controller) startProtection(timeoutSeconds int) {
 	if err != nil {
 		macos.SetMenuState("启动失败")
 		macos.ShowAlert("Guardian 启动失败", err.Error(), false)
+		c.restoreKeepAwakeIfRequested()
 		return
 	}
 	c.child = child
@@ -227,6 +229,8 @@ func (c *Controller) toggleKeepAwake() {
 		macos.SetMenuState("正在停止防锁屏")
 		if err := c.child.conn.Write(ipc.Message{Type: "stop"}); err != nil {
 			macos.SetMenuState("停止防锁屏失败")
+		} else {
+			c.keepAwakeRequested = false
 		}
 		return
 	}
@@ -253,6 +257,7 @@ func (c *Controller) toggleKeepAwake() {
 		return
 	}
 	c.child = child
+	c.keepAwakeRequested = true
 	macos.SetMenuState("正在启动防锁屏")
 }
 
@@ -264,6 +269,7 @@ func (c *Controller) requestAuthentication() {
 }
 
 func (c *Controller) quit() {
+	c.keepAwakeRequested = false
 	if c.child == nil {
 		macos.StopApp()
 		return
@@ -311,6 +317,9 @@ func (c *Controller) handleChildEvent(event childEvent) {
 		}
 		if event.child.mode == guardianModeKeepAwake {
 			macos.SetKeepAwakeActive(false)
+			if event.err != nil {
+				c.keepAwakeRequested = false
+			}
 		}
 		if event.err == nil && c.startPendingProtection() {
 			return
@@ -330,6 +339,9 @@ func (c *Controller) handleChildEvent(event childEvent) {
 				message,
 				false,
 			)
+		}
+		if event.child.mode == guardianModeProtection {
+			c.restoreKeepAwakeIfRequested()
 		}
 		return
 	}
@@ -365,7 +377,10 @@ func (c *Controller) handleChildEvent(event childEvent) {
 				macos.StopApp()
 				return
 			}
-			c.startPendingProtection()
+			if !c.startPendingProtection() &&
+				event.child.mode == guardianModeProtection {
+				c.restoreKeepAwakeIfRequested()
+			}
 		}
 	case "fatal":
 		event.child.fatalReported = true
@@ -387,6 +402,32 @@ func (c *Controller) startPendingProtection() bool {
 	c.pendingProtectionTimeout = 0
 	c.startProtection(timeoutSeconds)
 	return true
+}
+
+func (c *Controller) restoreKeepAwakeIfRequested() {
+	if !c.shouldRestoreKeepAwake() {
+		return
+	}
+	child, err := startGuardian(
+		c.childEvents,
+		guardianModeKeepAwake,
+		0,
+	)
+	if err != nil {
+		c.keepAwakeRequested = false
+		macos.SetMenuState("恢复防锁屏失败")
+		macos.ShowAlert("防锁屏进程恢复失败", err.Error(), false)
+		return
+	}
+	c.child = child
+	macos.SetMenuState("正在恢复防锁屏")
+}
+
+func (c *Controller) shouldRestoreKeepAwake() bool {
+	return c.keepAwakeRequested &&
+		c.child == nil &&
+		!c.quitWhenDisabled &&
+		!c.pendingProtection
 }
 
 func startGuardian(

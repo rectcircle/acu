@@ -292,6 +292,9 @@ Guardian 握手模式为 `keep_awake` 时，不创建 Event Tap、Shield Window 
 从该模式开启模拟锁屏时，Controller 先在 Idle Keeper 继续运行的情况下执行完整保护预检。
 预检失败则保持 `keep_awake`；预检成功后记录待启动的保护模式，向当前 Guardian 发送
 `stop`，收到 `disabled` 后再启动 `protection` Guardian。两个 Guardian 不并行运行。
+Controller 同时保留用户启用 `keep_awake` 的运行期意图；`protection` Guardian 停止后
+自动重新启动 `keep_awake` Guardian。用户主动停止该模式或退出应用时清除该意图，避免
+误恢复。
 
 ### 6.5 半合盖自动保护
 
