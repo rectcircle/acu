@@ -6,7 +6,9 @@
 #import <IOKit/hid/IOHIDManager.h>
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <Security/Security.h>
+#import <IOKit/graphics/IOGraphicsLib.h>
 #import <dispatch/dispatch.h>
+#import <dlfcn.h>
 #import <pthread.h>
 #import <stdatomic.h>
 #import <unistd.h>
@@ -31,6 +33,8 @@ static IOHIDManagerRef gLidAngleManager;
 static CFIndex gLidAngleReportID = 1;
 static pthread_mutex_t gLidAngleMutex = PTHREAD_MUTEX_INITIALIZER;
 static BOOL gLidAngleInitializationAttempted;
+static double gLidAnglePrevious;
+static BOOL gLidAngleKnown;
 
 static const NSInteger ACUShieldStatusTag = 1001;
 static NSString *const ACUHotKeyPreferenceKey = @"ACUGlobalHotKeyPreset";
@@ -54,6 +58,8 @@ static atomic_int gAuthenticationPID;
 static atomic_int gTrustedPIDs[64];
 static atomic_size_t gTrustedPIDCount;
 static atomic_uint_fast64_t gTrustedPIDGeneration;
+
+static BOOL gBrightnessSaved;
 
 static EventHotKeyRef gHotKeyRef;
 static EventHandlerRef gHotKeyHandler;
@@ -740,7 +746,20 @@ int acu_read_lid_angle(double *angle) {
         }
     }
     pthread_mutex_unlock(&gLidAngleMutex);
-    return valid ? 1 : 0;
+    if (!valid) {
+        return 0;
+    }
+
+    pthread_mutex_lock(&gLidAngleMutex);
+    if (gLidAngleKnown) {
+        if (fabs(*angle - gLidAnglePrevious) >= 0.5) {
+            acuLidAngleChanged();
+        }
+    }
+    gLidAnglePrevious = *angle;
+    gLidAngleKnown = YES;
+    pthread_mutex_unlock(&gLidAngleMutex);
+    return 1;
 }
 
 int acu_has_external_display(void) {
@@ -996,6 +1015,10 @@ static CGEventRef event_callback(CGEventTapProxy proxy,
 
     if (!physical && is_trusted_pid((pid_t)sourcePID)) {
         return event;
+    }
+
+    if (physical) {
+        acuPhysicalActivity();
     }
 
     if (type == kCGEventKeyDown) {
@@ -1387,4 +1410,188 @@ int acu_authenticate(void) {
         dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
         return success ? 1 : 0;
     }
+}
+
+#define ACU_MAX_DISPLAYS 16
+
+typedef int (*ACUDisplayServicesCanChangeBrightness)(
+    CGDirectDisplayID display);
+typedef int (*ACUDisplayServicesGetBrightness)(
+    CGDirectDisplayID display,
+    float *brightness);
+typedef int (*ACUDisplayServicesSetBrightness)(
+    CGDirectDisplayID display,
+    float brightness);
+
+typedef enum {
+    ACUBrightnessBackendNone,
+    ACUBrightnessBackendDisplayServices,
+    ACUBrightnessBackendIODisplay,
+} ACUBrightnessBackend;
+
+static struct {
+    CGDirectDisplayID display;
+    float brightness;
+    ACUBrightnessBackend backend;
+    int valid;
+} gDisplayBrightness[ACU_MAX_DISPLAYS];
+static pthread_mutex_t gBrightnessMutex = PTHREAD_MUTEX_INITIALIZER;
+static ACUDisplayServicesCanChangeBrightness gCanChangeBrightness;
+static ACUDisplayServicesGetBrightness gGetBrightness;
+static ACUDisplayServicesSetBrightness gSetBrightness;
+
+static void initialize_display_services(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+      void *framework = dlopen(
+          "/System/Library/PrivateFrameworks/DisplayServices.framework/"
+          "DisplayServices",
+          RTLD_LAZY | RTLD_LOCAL);
+      if (framework == NULL) {
+          return;
+      }
+      gCanChangeBrightness =
+          (ACUDisplayServicesCanChangeBrightness)dlsym(
+              framework, "DisplayServicesCanChangeBrightness");
+      gGetBrightness =
+          (ACUDisplayServicesGetBrightness)dlsym(
+              framework, "DisplayServicesGetBrightness");
+      gSetBrightness =
+          (ACUDisplayServicesSetBrightness)dlsym(
+              framework, "DisplayServicesSetBrightness");
+      if (gCanChangeBrightness == NULL || gGetBrightness == NULL ||
+          gSetBrightness == NULL) {
+          gCanChangeBrightness = NULL;
+          gGetBrightness = NULL;
+          gSetBrightness = NULL;
+      }
+    });
+}
+
+static io_service_t io_display_service(CGDirectDisplayID display) {
+    io_service_t framebuffer = CGDisplayIOServicePort(display);
+    if (framebuffer != MACH_PORT_NULL) {
+        return IODisplayForFramebuffer(framebuffer, 0);
+    }
+    return MACH_PORT_NULL;
+}
+
+static void clear_display_brightness(void) {
+    for (uint32_t i = 0; i < ACU_MAX_DISPLAYS; i++) {
+        gDisplayBrightness[i].valid = 0;
+        gDisplayBrightness[i].display = 0;
+        gDisplayBrightness[i].brightness = 0;
+        gDisplayBrightness[i].backend = ACUBrightnessBackendNone;
+    }
+}
+
+int acu_save_power_settings(void) {
+    CGDirectDisplayID displays[ACU_MAX_DISPLAYS];
+    uint32_t displayCount = 0;
+    if (CGGetOnlineDisplayList(ACU_MAX_DISPLAYS, displays, &displayCount) !=
+        kCGErrorSuccess) {
+        return 0;
+    }
+    uint32_t count = displayCount > ACU_MAX_DISPLAYS ? ACU_MAX_DISPLAYS : displayCount;
+
+    pthread_mutex_lock(&gBrightnessMutex);
+    if (gBrightnessSaved) {
+        pthread_mutex_unlock(&gBrightnessMutex);
+        return 1;
+    }
+
+    clear_display_brightness();
+    BOOL saved = NO;
+    initialize_display_services();
+    for (uint32_t i = 0; i < count; i++) {
+        float current = 0;
+        ACUBrightnessBackend backend = ACUBrightnessBackendNone;
+        int readResult = kIOReturnError;
+        int writeResult = kIOReturnError;
+
+        if (gCanChangeBrightness != NULL &&
+            gCanChangeBrightness(displays[i]) != 0) {
+            readResult = gGetBrightness(displays[i], &current);
+            writeResult = readResult == kIOReturnSuccess
+                ? gSetBrightness(displays[i], 0.0f)
+                : kIOReturnError;
+            if (readResult == kIOReturnSuccess &&
+                writeResult == kIOReturnSuccess) {
+                backend = ACUBrightnessBackendDisplayServices;
+            }
+        }
+
+        if (backend == ACUBrightnessBackendNone) {
+            io_service_t service = io_display_service(displays[i]);
+            if (service != MACH_PORT_NULL) {
+                readResult = IODisplayGetFloatParameter(
+                    service, 0, CFSTR("brightness"), &current);
+                writeResult = readResult == kIOReturnSuccess
+                    ? IODisplaySetFloatParameter(
+                          service, 0, CFSTR("brightness"), 0.0f)
+                    : kIOReturnError;
+                if (readResult == kIOReturnSuccess &&
+                    writeResult == kIOReturnSuccess) {
+                    backend = ACUBrightnessBackendIODisplay;
+                }
+                IOObjectRelease(service);
+            }
+        }
+
+        if (backend == ACUBrightnessBackendNone) {
+            continue;
+        }
+        gDisplayBrightness[i].display = displays[i];
+        gDisplayBrightness[i].brightness = current;
+        gDisplayBrightness[i].backend = backend;
+        gDisplayBrightness[i].valid = 1;
+        saved = YES;
+    }
+    gBrightnessSaved = saved;
+    pthread_mutex_unlock(&gBrightnessMutex);
+    return saved ? 1 : 0;
+}
+
+int acu_restore_power_settings(void) {
+    pthread_mutex_lock(&gBrightnessMutex);
+    if (!gBrightnessSaved) {
+        pthread_mutex_unlock(&gBrightnessMutex);
+        return 1;
+    }
+    BOOL restored = YES;
+    initialize_display_services();
+    for (uint32_t i = 0; i < ACU_MAX_DISPLAYS; i++) {
+        if (!gDisplayBrightness[i].valid) {
+            continue;
+        }
+        int result = kIOReturnError;
+        if (gDisplayBrightness[i].backend ==
+                ACUBrightnessBackendDisplayServices &&
+            gSetBrightness != NULL) {
+            result = gSetBrightness(
+                gDisplayBrightness[i].display,
+                gDisplayBrightness[i].brightness);
+        } else if (gDisplayBrightness[i].backend ==
+                   ACUBrightnessBackendIODisplay) {
+            io_service_t service =
+                io_display_service(gDisplayBrightness[i].display);
+            if (service != MACH_PORT_NULL) {
+                result = IODisplaySetFloatParameter(
+                    service,
+                    0,
+                    CFSTR("brightness"),
+                    gDisplayBrightness[i].brightness);
+                IOObjectRelease(service);
+            }
+        }
+        if (result != kIOReturnSuccess) {
+            restored = NO;
+        }
+    }
+    if (restored) {
+        gBrightnessSaved = NO;
+        clear_display_brightness();
+    }
+    pthread_mutex_unlock(&gBrightnessMutex);
+    return restored ? 1 : 0;
 }

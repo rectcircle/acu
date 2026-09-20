@@ -43,6 +43,8 @@ var (
 	menuEvents    = make(chan MenuAction, 8)
 	guardianEnter = make(chan struct{}, 1)
 	tapDegraded   = make(chan struct{}, 1)
+	physicalActivity = make(chan struct{}, 1)
+	lidAngleChanged  = make(chan struct{}, 1)
 )
 
 //export acuMenuAction
@@ -69,6 +71,22 @@ func acuTapDegraded() {
 	}
 }
 
+//export acuPhysicalActivity
+func acuPhysicalActivity() {
+	select {
+	case physicalActivity <- struct{}{}:
+	default:
+	}
+}
+
+//export acuLidAngleChanged
+func acuLidAngleChanged() {
+	select {
+	case lidAngleChanged <- struct{}{}:
+	default:
+	}
+}
+
 func InitMenu() error {
 	if C.acu_init_menu() == 0 {
 		return errors.New("menu initialization failed")
@@ -86,6 +104,14 @@ func GuardianEnterEvents() <-chan struct{} {
 
 func TapDegradedEvents() <-chan struct{} {
 	return tapDegraded
+}
+
+func PhysicalActivityEvents() <-chan struct{} {
+	return physicalActivity
+}
+
+func LidAngleChangedEvents() <-chan struct{} {
+	return lidAngleChanged
 }
 
 func RunApp() {
@@ -256,4 +282,12 @@ func Authenticate() (bool, error) {
 		return false, errors.New("device owner authentication unavailable")
 	}
 	return result > 0, nil
+}
+
+func SavePowerSettings() bool {
+	return C.acu_save_power_settings() != 0
+}
+
+func RestorePowerSettings() bool {
+	return C.acu_restore_power_settings() != 0
 }

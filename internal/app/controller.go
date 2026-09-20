@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"strings"
@@ -118,6 +119,17 @@ func (c *Controller) pollLidAutomation(now time.Time) {
 		(c.child.mode == guardianModeKeepAwake && !c.pendingProtection)
 	protectionActive :=
 		c.child != nil && c.child.mode == guardianModeProtection
+
+	// 盖子角度变化 → 通知 guardian 恢复显示器亮度。
+	// nudge 是合成事件（带 marker），不会触发 event callback 中的
+	// acuPhysicalActivity()，因此需要 controller 通过 IPC 转发。
+	if protectionActive {
+		angleMoved := !c.lidAutomation.angleKnown ||
+			math.Abs(angle-c.lidAutomation.lastAngle) >= lidMovementThreshold
+		if angleMoved {
+			_ = c.child.conn.Write(ipc.Message{Type: "activity"})
+		}
+	}
 
 	switch c.lidAutomation.observe(
 		now,

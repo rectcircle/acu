@@ -20,9 +20,13 @@ const (
 	messageStop        = "stop"
 	messageState       = "state"
 	messageFatal       = "fatal"
+	messageActivity    = "activity"
 	modeProtection     = "protection"
 	modeKeepAwake      = "keep_awake"
 	testTimeoutSeconds = 15
+	idleTimeout        = 15 * time.Second
+	restoreAttempts    = 3
+	restoreRetryDelay  = 100 * time.Millisecond
 )
 
 type command int
@@ -30,6 +34,7 @@ type command int
 const (
 	commandAuthenticate command = iota + 1
 	commandStop
+	commandActivity
 )
 
 func Run(conn *ipc.Conn, cfg config.Config) error {
@@ -69,6 +74,14 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 	var cleanupOnce sync.Once
 	cleanup := func() {
 		cleanupOnce.Do(func() {
+			for attempt := 0; attempt < restoreAttempts; attempt++ {
+				if macos.RestorePowerSettings() {
+					break
+				}
+				if attempt+1 < restoreAttempts {
+					time.Sleep(restoreRetryDelay)
+				}
+			}
 			macos.StopInputGuard()
 			macos.HideShields()
 		})
@@ -110,18 +123,41 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 	go func() {
 		commandChannel := (<-chan command)(commands)
 		failures := 0
+		lastActivity := time.Now()
+		powerSaved := false
+		// 省电恢复：有物理操作 → 立即恢复显示器亮度。
+		// 事件经 channel 投递至本 goroutine 后恢复，RestorePowerSettings 为轻量 IOKit 调用
+		// 且幂等（gBrightnessSaved 哨兵 + C 侧 mutex），不会阻塞主循环。
+		restoreIfActive := func() {
+			if powerSaved {
+				powerSaved = !macos.RestorePowerSettings()
+			}
+		}
 		for {
 			select {
 			case <-macos.GuardianEnterEvents():
 				enqueueAuthenticate(commands)
+			case <-macos.PhysicalActivityEvents():
+				lastActivity = time.Now()
+				restoreIfActive()
+			case <-macos.LidAngleChangedEvents():
+				lastActivity = time.Now()
+				restoreIfActive()
 			case next, ok := <-commandChannel:
 				if !ok {
 					commandChannel = nil
 					continue
 				}
+				if next == commandActivity {
+					lastActivity = time.Now()
+					restoreIfActive()
+					continue
+				}
 				if next != commandAuthenticate {
 					continue
 				}
+				lastActivity = time.Now()
+				restoreIfActive()
 				state := machine.State()
 				if state != StateProtected && state != StateDegraded {
 					continue
@@ -162,6 +198,19 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 					macos.ShowInputGuardFailure()
 				}
 			case <-ticker.C:
+				// 省电：15 秒无物理操作 → 调低屏幕亮度到 0。
+				// 重检状态：测试模式超时 goroutine 可能在状态检查后、保存前执行 cleanup
+				// 并调暗屏幕，重检缩窄竞态窗口（残余窗口由 C 侧 mutex 保护快照原子性）
+				if machine.State() == StateProtected &&
+					!powerSaved &&
+					time.Since(lastActivity) >= idleTimeout {
+					powerSaved = macos.SavePowerSettings()
+					if machine.State() != StateProtected {
+						powerSaved = !macos.RestorePowerSettings()
+					}
+				}
+
+				// 防锁屏：45 秒无系统活动 → nudge（nudge 事件带 marker，不计为操作）
 				if machine.State() != StateProtected ||
 					macos.SessionLocked() ||
 					macos.IdleDuration() < cfg.IdleBeforeNudge {
@@ -282,6 +331,8 @@ func readCommands(conn *ipc.Conn, commands chan<- command) {
 			enqueueAuthenticate(commands)
 		} else if message.Type == messageStop {
 			enqueueCommand(commands, commandStop)
+		} else if message.Type == messageActivity {
+			enqueueCommand(commands, commandActivity)
 		}
 	}
 }

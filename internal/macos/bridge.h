@@ -55,8 +55,13 @@ double acu_idle_seconds(void);
 int acu_nudge_cursor(double distance, int restore_delay_ms, uint64_t marker);
 int acu_authenticate(void);
 
+int acu_save_power_settings(void);
+int acu_restore_power_settings(void);
+
 void acuMenuAction(int action);
 void acuGuardianEnter(void);
 void acuTapDegraded(void);
+void acuPhysicalActivity(void);
+void acuLidAngleChanged(void);
 
 #endif

@@ -47,3 +47,20 @@ func TestConnRejectsOversizedWrite(t *testing.T) {
 		t.Fatalf("expected ErrMessageTooLarge, got %v", err)
 	}
 }
+
+func TestActivityMessageRoundTrip(t *testing.T) {
+	var stream bytes.Buffer
+	writer := New(strings.NewReader(""), &stream)
+	want := Message{Type: "activity"}
+	if err := writer.Write(want); err != nil {
+		t.Fatal(err)
+	}
+	reader := New(&stream, &bytes.Buffer{})
+	got, err := reader.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Type != "activity" {
+		t.Fatalf("got type %q, want %q", got.Type, "activity")
+	}
+}
