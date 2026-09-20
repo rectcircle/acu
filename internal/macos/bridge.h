@@ -58,6 +58,9 @@ int acu_authenticate(void);
 int acu_save_power_settings(void);
 int acu_restore_power_settings(void);
 
+int acu_keep_awake_persisted(void);
+void acu_set_keep_awake_persisted(int enabled);
+
 void acuMenuAction(int action);
 void acuGuardianEnter(void);
 void acuTapDegraded(void);

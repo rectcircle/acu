@@ -42,6 +42,8 @@ static NSString *const ACUTrustedTeamIdentifiersKey =
     @"ACUTrustedTeamIdentifiers";
 static NSString *const ACULidAutomationEnabledKey =
     @"ACULidAutomationEnabled";
+static NSString *const ACUKeepAwakeEnabledKey =
+    @"ACUKeepAwakeEnabled";
 static NSString *const ACULidAngleThresholdKey =
     @"ACULidAngleThreshold";
 
@@ -506,6 +508,11 @@ int acu_init_menu(void) {
                            available);
         initialize_lid_angle_sensor();
         update_lid_automation_menu();
+        // 进程重启后立即恢复防锁屏的勾选状态（不必等子进程上报 awake）。
+        if (acu_keep_awake_persisted()) {
+            gKeepAwakeMenuItem.title = @"停止阻止系统锁屏";
+            gKeepAwakeMenuItem.state = NSControlStateValueOn;
+        }
         return 1;
     }
 }
@@ -1594,4 +1601,17 @@ int acu_restore_power_settings(void) {
     }
     pthread_mutex_unlock(&gBrightnessMutex);
     return restored ? 1 : 0;
+}
+
+int acu_keep_awake_persisted(void) {
+    id stored =
+        [[NSUserDefaults standardUserDefaults]
+            objectForKey:ACUKeepAwakeEnabledKey];
+    return stored == nil ? 0 : ([stored boolValue] ? 1 : 0);
+}
+
+void acu_set_keep_awake_persisted(int enabled) {
+    [[NSUserDefaults standardUserDefaults]
+        setBool:enabled != 0
+         forKey:ACUKeepAwakeEnabledKey];
 }

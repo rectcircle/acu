@@ -40,9 +40,9 @@ const (
 )
 
 var (
-	menuEvents    = make(chan MenuAction, 8)
-	guardianEnter = make(chan struct{}, 1)
-	tapDegraded   = make(chan struct{}, 1)
+	menuEvents       = make(chan MenuAction, 8)
+	guardianEnter    = make(chan struct{}, 1)
+	tapDegraded      = make(chan struct{}, 1)
 	physicalActivity = make(chan struct{}, 1)
 	lidAngleChanged  = make(chan struct{}, 1)
 )
@@ -290,4 +290,17 @@ func SavePowerSettings() bool {
 
 func RestorePowerSettings() bool {
 	return C.acu_restore_power_settings() != 0
+}
+
+// KeepAwakePersisted 返回防锁屏是否被用户持久化开启（跨进程重启保存）。
+func KeepAwakePersisted() bool {
+	return C.acu_keep_awake_persisted() != 0
+}
+
+func SetKeepAwakePersisted(enabled bool) {
+	var value C.int
+	if enabled {
+		value = 1
+	}
+	C.acu_set_keep_awake_persisted(value)
 }

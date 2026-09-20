@@ -59,6 +59,20 @@ func Run() error {
 			lidConfig.ThresholdAngle,
 		),
 	}
+	// 进程重启后，若用户之前持久化开启了防锁屏，则自动恢复。
+	if macos.KeepAwakePersisted() {
+		macos.SetMenuState("正在恢复防锁屏")
+		child, err := startGuardian(controller.childEvents, guardianModeKeepAwake, 0)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "restore keep-awake guardian: %v\n", err)
+			macos.SetKeepAwakeActive(false)
+			macos.SetMenuState("恢复防锁屏失败")
+			macos.ShowAlert("防锁屏进程恢复失败", err.Error(), false)
+		} else {
+			controller.child = child
+			controller.keepAwakeRequested = true
+		}
+	}
 	go controller.loop()
 	macos.RunApp()
 	return nil
@@ -243,6 +257,7 @@ func (c *Controller) toggleKeepAwake() {
 			macos.SetMenuState("停止防锁屏失败")
 		} else {
 			c.keepAwakeRequested = false
+			macos.SetKeepAwakePersisted(false)
 		}
 		return
 	}
@@ -270,6 +285,7 @@ func (c *Controller) toggleKeepAwake() {
 	}
 	c.child = child
 	c.keepAwakeRequested = true
+	macos.SetKeepAwakePersisted(true)
 	macos.SetMenuState("正在启动防锁屏")
 }
 
