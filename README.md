@@ -20,18 +20,33 @@ ACU（Automation / Agent Continuity Utility）是一个 macOS 菜单栏工具，
 
 ```sh
 brew tap rectcircle/acu https://github.com/rectcircle/acu
-brew install --cask rectcircle/acu/acu
+brew install --cask --no-quarantine rectcircle/acu/acu
 ```
 
 升级到最新版本：
 
 ```sh
-brew upgrade --cask --greedy rectcircle/acu/acu
+brew upgrade --cask rectcircle/acu/acu
 ```
 
-当前发布包使用 ad-hoc 签名，未经 Apple 公证。通过 Homebrew 或浏览器下载后，macOS
-可能阻止首次启动；请尝试打开一次 ACU，然后前往“系统设置 > 隐私与安全性”选择
-“仍要打开”。本项目不会要求全局关闭 Gatekeeper。不希望放行下载产物时，可选择从源码构建。
+当前发布包使用 ad-hoc 签名，未经 Apple 公证。`--no-quarantine` 仅跳过该安装包的
+Gatekeeper 首次运行检查，不会全局关闭 Gatekeeper，也不会自动授予辅助功能等权限。
+Cask 固定版本和 SHA-256，但仍应仅在信任本仓库及其发布产物时使用该参数。
+
+如果不信任预编译产物，请勿使用 `--no-quarantine`。可以先让代码 Agent 审查源码，
+重点检查 `Casks/acu.rb`、`internal/macos` 和 `scripts/build-app.sh`，然后从固定标签
+本地编译：
+
+```sh
+git clone https://github.com/rectcircle/acu.git
+cd acu
+git checkout v0.1.1
+go test ./...
+./scripts/build-app.sh
+open "build/ACU.app"
+```
+
+本地编译会重新生成可执行文件并进行 ad-hoc 签名，通常不会带有下载文件的 quarantine。
 
 ## 构建
 
@@ -45,12 +60,13 @@ open "build/ACU.app"
 生成同时支持 Apple Silicon 和 Intel Mac 的发布包：
 
 ```sh
-./scripts/package-release.sh 0.1.0
+./scripts/package-release.sh 0.1.1
 ```
 
-推送 `v0.1.0` 格式的标签后，GitHub Actions 会自动测试、构建
+推送 `v0.1.1` 格式的标签后，GitHub Actions 会自动测试、构建
 `ACU.tar.gz` 并创建 Release。Release Notes 来自 `CHANGELOG.md` 中对应版本的双语
-章节；缺少该版本时发布会失败。Homebrew Cask 始终下载最新 Release。
+章节；缺少该版本时发布会失败。发布成功后，流水线会使用实际产物的 SHA-256 更新
+Homebrew Cask。
 
 首次启用时，需要在“系统设置 > 隐私与安全性 > 辅助功能”中授权 ACU。该权限
 通常已覆盖模拟锁屏所需的事件监听和投递能力；仅当权限诊断仍提示无法监听输入事件时，

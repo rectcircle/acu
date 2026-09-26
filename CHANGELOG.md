@@ -5,6 +5,46 @@
 This file records notable changes to ACU. Every release includes both Chinese
 and English notes.
 
+## [0.1.1] - 2026-09-26
+
+> [!WARNING]
+> Homebrew 安装命令使用 `--no-quarantine`，会跳过该安装包的 Gatekeeper 首次运行检查。
+> 仅在信任本仓库及其发布产物时使用；否则应先审查源码并在本地编译。
+>
+> The Homebrew command uses `--no-quarantine`, which skips Gatekeeper's
+> first-launch assessment for this installation. Use it only if you trust this
+> repository and its release artifacts; otherwise review and build the source
+> locally.
+
+### 中文
+
+#### 修复
+
+- 修复“仅阻止系统锁屏”设置未在应用重启后恢复的问题。
+
+#### 变更
+
+- Homebrew Cask 改为固定版本和 SHA-256，并明确使用
+  `--no-quarantine` 安装未公证版本的风险。
+- 发布流水线会在创建 Release 后，使用实际产物版本和 SHA-256 自动更新 Cask。
+- README 增加由代码 Agent 审查源码后进行本地编译的替代安装流程。
+
+### English
+
+#### Fixed
+
+- Fixed the "Prevent System Lock Only" setting not being restored after an app
+  restart.
+
+#### Changed
+
+- Pinned the Homebrew Cask version and SHA-256 checksum, with an explicit
+  warning about installing the unnotarized build using `--no-quarantine`.
+- The release workflow now updates the Cask with the released version and
+  actual SHA-256 checksum after creating the GitHub Release.
+- Added an alternative installation flow for reviewing the source with a code
+  agent and building locally.
+
 ## [0.1.0] - 2026-09-26
 
 > [!IMPORTANT]

@@ -727,8 +727,9 @@ cgo 链接：
 
 ### 14.2 签名
 
-首版零成本分发使用 ad-hoc 签名，不进行 Apple 公证，并在 Release、Homebrew Cask 和
-README 中明确首次启动需要用户在系统设置中批准。不得要求用户全局关闭 Gatekeeper。
+零成本分发使用 ad-hoc 签名，不进行 Apple 公证。Homebrew Cask 必须固定版本和
+SHA-256，并由用户显式选择 `--no-quarantine`；不得在安装脚本中静默移除 quarantine，
+也不得要求用户全局关闭 Gatekeeper。不信任预编译产物时应从固定标签审查并本地构建。
 稳定的无提示分发仍需使用 Developer ID、Hardened Runtime 和 notarization。
 每次更新签名 identity 后都要回归 Accessibility 权限迁移行为。
 

@@ -24,20 +24,37 @@ language configured in macOS. Restart ACU after changing the language.
 
 ```sh
 brew tap rectcircle/acu https://github.com/rectcircle/acu
-brew install --cask rectcircle/acu/acu
+brew install --cask --no-quarantine rectcircle/acu/acu
 ```
 
 Upgrade to the latest version:
 
 ```sh
-brew upgrade --cask --greedy rectcircle/acu/acu
+brew upgrade --cask rectcircle/acu/acu
 ```
 
 Current release builds use an ad-hoc signature and are not notarized by Apple.
-After downloading with Homebrew or a browser, macOS may block the first launch.
-Try to open ACU once, then choose Open Anyway under System Settings > Privacy &
-Security. This project does not require disabling Gatekeeper globally. Build
-from source instead if you do not want to approve a downloaded build.
+`--no-quarantine` skips Gatekeeper's first-launch assessment only for this
+installation. It does not disable Gatekeeper globally or grant permissions such
+as Accessibility. The Cask pins both the version and SHA-256 checksum, but this
+option should still be used only when you trust this repository and its release
+artifacts.
+
+If you do not trust the prebuilt artifact, do not use `--no-quarantine`. Ask a
+code agent to review the source, especially `Casks/acu.rb`, `internal/macos`,
+and `scripts/build-app.sh`, then build locally from a fixed tag:
+
+```sh
+git clone https://github.com/rectcircle/acu.git
+cd acu
+git checkout v0.1.1
+go test ./...
+./scripts/build-app.sh
+open "build/ACU.app"
+```
+
+A local build regenerates the executable and applies an ad-hoc signature. It
+normally does not carry the quarantine attribute applied to downloaded apps.
 
 ## Build
 
@@ -51,13 +68,14 @@ open "build/ACU.app"
 Build a release archive that supports both Apple Silicon and Intel Macs:
 
 ```sh
-./scripts/package-release.sh 0.1.0
+./scripts/package-release.sh 0.1.1
 ```
 
-Pushing a tag such as `v0.1.0` runs the GitHub Actions workflow, which tests the
+Pushing a tag such as `v0.1.1` runs the GitHub Actions workflow, which tests the
 project, builds `ACU.tar.gz`, and creates a release. Release notes come from the
 matching bilingual section in `CHANGELOG.md`; publishing fails if that version
-is missing. The Homebrew Cask always downloads the latest release.
+is missing. After publishing, the workflow updates the Homebrew Cask with the
+released version and its actual SHA-256 checksum.
 
 On first use, grant ACU access under System Settings > Privacy & Security >
 Accessibility. This permission normally covers the event monitoring and

@@ -74,9 +74,34 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$RELEASE_TAG" \
-            build/ACU.tar.gz \
-            build/ACU.tar.gz.sha256 \
-            --title "ACU $RELEASE_TAG" \
-            --notes-file build/release-notes.md \
-            --verify-tag
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              build/ACU.tar.gz \
+              build/ACU.tar.gz.sha256 \
+              --clobber
+            gh release edit "$RELEASE_TAG" \
+              --title "ACU $RELEASE_TAG" \
+              --notes-file build/release-notes.md
+          else
+            gh release create "$RELEASE_TAG" \
+              build/ACU.tar.gz \
+              build/ACU.tar.gz.sha256 \
+              --title "ACU $RELEASE_TAG" \
+              --notes-file build/release-notes.md \
+              --verify-tag
+          fi
+
+      - name: Update Homebrew cask
+        run: |
+          sha256=$(awk 'NR == 1 { print $1 }' build/ACU.tar.gz.sha256)
+          git fetch origin main
+          git checkout -B homebrew-update origin/main
+          ./scripts/update-cask.sh "$RELEASE_TAG" "$sha256"
+          git add Casks/acu.rb
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git -c user.name=github-actions[bot] \
+              -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+              commit -m "chore(homebrew): update acu to ${RELEASE_TAG#v}"
+          git push origin HEAD:main
