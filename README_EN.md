@@ -142,3 +142,7 @@ go vet ./...
 
 See [document](document/README.md) for product requirements and technical
 constraints.
+
+## License
+
+[MIT License](LICENSE)

@@ -114,3 +114,7 @@ go vet ./...
 ```
 
 产品需求和技术约束见 [document](document/README.md)。
+
+## 许可证
+
+[MIT License](LICENSE)
