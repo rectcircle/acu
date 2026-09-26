@@ -296,11 +296,3 @@ func RestorePowerSettings() bool {
 func KeepAwakePersisted() bool {
 	return C.acu_keep_awake_persisted() != 0
 }
-
-func SetKeepAwakePersisted(enabled bool) {
-	var value C.int
-	if enabled {
-		value = 1
-	}
-	C.acu_set_keep_awake_persisted(value)
-}
