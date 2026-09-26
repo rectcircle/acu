@@ -702,7 +702,7 @@ CFBundleName
 CFBundleVersion
 CFBundleShortVersionString
 LSUIElement = true
-LSMinimumSystemVersion = 13.0
+LSMinimumSystemVersion = 15.0
 ```
 
 构建：
@@ -727,7 +727,9 @@ cgo 链接：
 
 ### 14.2 签名
 
-个人开发可先 ad-hoc 签名。稳定分发应使用 Developer ID、Hardened Runtime 和 notarization。
+首版零成本分发使用 ad-hoc 签名，不进行 Apple 公证，并在 Release、Homebrew Cask 和
+README 中明确首次启动需要用户在系统设置中批准。不得要求用户全局关闭 Gatekeeper。
+稳定的无提示分发仍需使用 Developer ID、Hardened Runtime 和 notarization。
 每次更新签名 identity 后都要回归 Accessibility 权限迁移行为。
 
 ## 15. 并发与资源释放
@@ -784,7 +786,7 @@ cgo 链接：
 至少覆盖：
 
 1. Intel/Apple Silicon。
-2. macOS 13、14、15，以及开发时最新版本。
+2. macOS 15，以及开发时最新版本。
 3. 单屏、双屏、显示器热插拔。
 4. 普通窗口、全屏 App、多个 Space。
 5. 自动化客户端的核心采集与交互操作。

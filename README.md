@@ -1,5 +1,7 @@
 # ACU
 
+[English](README_EN.md) | [更新日志](CHANGELOG.md)
+
 ACU（Automation / Agent Continuity Utility）是一个 macOS 菜单栏工具，在 UI 自动化
 客户端运行期间提供应用层
 模拟锁屏：
@@ -12,14 +14,43 @@ ACU（Automation / Agent Continuity Utility）是一个 macOS 菜单栏工具，
 
 它不是 macOS 真锁屏，不抵御进程终止、管理员权限或机器重启。
 
+界面支持简体中文和英文，并跟随 macOS 的首选语言；修改语言后需要重新启动 ACU。
+
+## Homebrew 安装
+
+```sh
+brew tap rectcircle/acu https://github.com/rectcircle/acu-helper
+brew install --cask rectcircle/acu/acu
+```
+
+升级到最新版本：
+
+```sh
+brew upgrade --cask --greedy rectcircle/acu/acu
+```
+
+当前发布包使用 ad-hoc 签名，未经 Apple 公证。通过 Homebrew 或浏览器下载后，macOS
+可能阻止首次启动；请尝试打开一次 ACU，然后前往“系统设置 > 隐私与安全性”选择
+“仍要打开”。本项目不会要求全局关闭 Gatekeeper。不希望放行下载产物时，可选择从源码构建。
+
 ## 构建
 
-要求 macOS 13 或更高版本、Go 1.22 或更高版本以及 Xcode Command Line Tools。
+要求 macOS 15 或更高版本、Go 1.22 或更高版本以及 Xcode Command Line Tools。
 
 ```sh
 ./scripts/build-app.sh
 open "build/ACU.app"
 ```
+
+生成同时支持 Apple Silicon 和 Intel Mac 的发布包：
+
+```sh
+./scripts/package-release.sh 0.1.0
+```
+
+推送 `v0.1.0` 格式的标签后，GitHub Actions 会自动测试、构建
+`ACU.tar.gz` 并创建 Release。Release Notes 来自 `CHANGELOG.md` 中对应版本的双语
+章节；缺少该版本时发布会失败。Homebrew Cask 始终下载最新 Release。
 
 首次启用时，需要在“系统设置 > 隐私与安全性 > 辅助功能”中授权 ACU。该权限
 通常已覆盖模拟锁屏所需的事件监听和投递能力；仅当权限诊断仍提示无法监听输入事件时，
@@ -37,7 +68,8 @@ open "build/ACU.app"
 或合盖导致系统会话锁定时不会触发，重新完全展开前也不会补触发。该功能仅支持带兼容铰链角度传感器的
 MacBook；可在“权限诊断”中查看实时角度或不可用状态。
 
-首次验收请使用菜单中的“测试模拟锁屏（15 秒自动退出）”。测试模式使用完整的保护层和
+首次验收请按住 `Option` 点击菜单栏图标，再选择“测试模拟锁屏（15 秒自动退出）”。
+“权限诊断”也位于这个隐藏菜单中。测试模式使用完整的保护层和
 输入拦截，遮罩会显示剩余时间，并由 Guardian 在 15 秒后自动清理。正式保护模式下，按物理 Enter 打开
 macOS 原生认证面板，认证成功后退出保护。
 
@@ -49,6 +81,9 @@ macOS 原生认证面板，认证成功后退出保护。
 
 默认全局快捷键为 `Control+Option+Command+L`，仅用于开启模拟锁屏。可在菜单
 “开启快捷键”中切换为其他预设或关闭；快捷键不能解除保护。
+
+勾选菜单中的“登录后自动启动”后，ACU 会注册为当前用户的登录项。若该登录项曾在
+系统设置中被禁用，菜单会提示需要系统批准，并打开“通用 > 登录项与扩展”供用户启用。
 
 如果物理输入拦截无法恢复，遮罩上方会显示故障弹窗。可从弹窗发起原生身份认证并安全退出，
 或保持遮罩等待后续处理。

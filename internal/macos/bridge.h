@@ -6,11 +6,10 @@
 enum {
     ACU_MENU_ENABLE = 1,
     ACU_MENU_TEST = 2,
-    ACU_MENU_UNLOCK = 3,
-    ACU_MENU_DIAGNOSTICS = 4,
-    ACU_MENU_QUIT = 5,
-    ACU_MENU_KEEP_AWAKE = 6,
-    ACU_MENU_LID_CONFIGURATION = 7,
+    ACU_MENU_DIAGNOSTICS = 3,
+    ACU_MENU_QUIT = 4,
+    ACU_MENU_KEEP_AWAKE = 5,
+    ACU_MENU_LID_CONFIGURATION = 6,
 };
 
 enum {
@@ -25,6 +24,7 @@ enum {
 int acu_init_menu(void);
 void acu_run_app(void);
 void acu_stop_app(void);
+char *acu_localized_string(const char *key);
 void acu_set_menu_state(const char *state);
 void acu_set_keep_awake_active(int active);
 int acu_show_alert(const char *title, const char *message, int confirm);
@@ -59,6 +59,7 @@ int acu_save_power_settings(void);
 int acu_restore_power_settings(void);
 
 int acu_keep_awake_persisted(void);
+void acu_set_keep_awake_persisted(int enabled);
 
 void acuMenuAction(int action);
 void acuGuardianEnter(void);

@@ -8,6 +8,7 @@
 #import <IOKit/hid/IOHIDManager.h>
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <IOKit/graphics/IOGraphicsLib.h>
+#import <ServiceManagement/ServiceManagement.h>
 #import <dispatch/dispatch.h>
 #import <dlfcn.h>
 #import <math.h>
@@ -15,14 +16,18 @@
 #import <pthread.h>
 #import <stdatomic.h>
 #import <stdio.h>
+#import <string.h>
 #import <unistd.h>
 
 static NSStatusItem *gStatusItem;
 static NSMenuItem *gStateItem;
 static NSMenuItem *gEnableMenuItem;
 static NSMenuItem *gKeepAwakeMenuItem;
+static NSMenuItem *gLaunchAtLoginMenuItem;
 static NSMenuItem *gLidAutomationMenuItem;
 static NSMenuItem *gLidAngleRootItem;
+static NSMenuItem *gTestProtectionMenuItem;
+static NSMenuItem *gDiagnosticsMenuItem;
 static NSArray<NSMenuItem *> *gLidAngleMenuItems;
 static NSArray<NSMenuItem *> *gShieldBackgroundMenuItems;
 static NSMenuItem *gHotKeyRootItem;
@@ -98,6 +103,13 @@ typedef NS_ENUM(NSInteger, ACUShieldBackgroundStyle) {
 
 static BOOL initialize_lid_angle_sensor(void);
 static void update_lid_automation_menu(void);
+static void update_launch_at_login_menu(void);
+
+static NSString *localized(NSString *key) {
+    return [[NSBundle mainBundle] localizedStringForKey:key
+                                                 value:key
+                                                 table:nil];
+}
 
 static void on_main_sync(dispatch_block_t block) {
     if (pthread_main_np()) {
@@ -179,8 +191,8 @@ static void update_hotkey_menu(ACUHotKeyPreset preset, BOOL available) {
         item.state = item.tag == preset ? NSControlStateValueOn
                                        : NSControlStateValueOff;
     }
-    gHotKeyRootItem.title =
-        available ? @"开启快捷键" : @"开启快捷键（注册失败）";
+    gHotKeyRootItem.title = localized(
+        available ? @"menu.hotkey" : @"menu.hotkey.registration_failed");
 
     NSString *key = @"";
     if (preset == ACUHotKeyPresetDefault) {
@@ -325,9 +337,9 @@ static void update_lid_automation_menu(void) {
     gLidAutomationMenuItem.state =
         available && enabled ? NSControlStateValueOn
                              : NSControlStateValueOff;
-    gLidAutomationMenuItem.title =
-        available ? @"半合盖自动保护"
-                  : @"半合盖自动保护（传感器不可用）";
+    gLidAutomationMenuItem.title = localized(
+        available ? @"menu.lid_automation"
+                  : @"menu.lid_automation.sensor_unavailable");
     gLidAngleRootItem.enabled = available;
     for (NSMenuItem *item in gLidAngleMenuItems) {
         item.state = item.tag == threshold ? NSControlStateValueOn
@@ -335,11 +347,32 @@ static void update_lid_automation_menu(void) {
     }
 }
 
-@interface ACUMenuTarget : NSObject
+static void update_launch_at_login_menu(void) {
+    SMAppServiceStatus status = SMAppService.mainAppService.status;
+    gLaunchAtLoginMenuItem.state =
+        status == SMAppServiceStatusEnabled ? NSControlStateValueOn
+                                            : NSControlStateValueOff;
+    gLaunchAtLoginMenuItem.title = localized(
+        status == SMAppServiceStatusRequiresApproval
+            ? @"menu.launch_at_login.approval_required"
+            : @"menu.launch_at_login");
+}
+
+static void show_launch_at_login_error(NSString *action, NSError *error) {
+    NSLog(@"ACU: %@ login item failed: %@", action, error);
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = localized(@"alert.login_item.title");
+    alert.informativeText =
+        error.localizedDescription ?: localized(@"alert.unknown_error");
+    [alert addButtonWithTitle:localized(@"button.ok")];
+    [alert runModal];
+}
+
+@interface ACUMenuTarget : NSObject <NSMenuDelegate>
 - (void)enable:(id)sender;
 - (void)toggleKeepAwake:(id)sender;
+- (void)toggleLaunchAtLogin:(id)sender;
 - (void)testProtection:(id)sender;
-- (void)unlock:(id)sender;
 - (void)diagnostics:(id)sender;
 - (void)toggleLidAutomation:(id)sender;
 - (void)selectLidAngle:(id)sender;
@@ -349,6 +382,14 @@ static void update_lid_automation_menu(void) {
 @end
 
 @implementation ACUMenuTarget
+- (void)menuWillOpen:(NSMenu *)menu {
+    (void)menu;
+    BOOL showAdvancedItems =
+        ([NSEvent modifierFlags] & NSEventModifierFlagOption) != 0;
+    gTestProtectionMenuItem.hidden = !showAdvancedItems;
+    gDiagnosticsMenuItem.hidden = !showAdvancedItems;
+    update_launch_at_login_menu();
+}
 - (void)enable:(id)sender {
     (void)sender;
     acuMenuAction(ACU_MENU_ENABLE);
@@ -357,13 +398,29 @@ static void update_lid_automation_menu(void) {
     (void)sender;
     acuMenuAction(ACU_MENU_KEEP_AWAKE);
 }
+- (void)toggleLaunchAtLogin:(id)sender {
+    (void)sender;
+    SMAppService *service = SMAppService.mainAppService;
+    if (service.status == SMAppServiceStatusRequiresApproval) {
+        [SMAppService openSystemSettingsLoginItems];
+        update_launch_at_login_menu();
+        return;
+    }
+
+    NSError *error = nil;
+    BOOL unregistering = service.status == SMAppServiceStatusEnabled;
+    BOOL succeeded = unregistering
+                         ? [service unregisterAndReturnError:&error]
+                         : [service registerAndReturnError:&error];
+    if (!succeeded) {
+        NSString *action = unregistering ? @"unregister" : @"register";
+        show_launch_at_login_error(action, error);
+    }
+    update_launch_at_login_menu();
+}
 - (void)testProtection:(id)sender {
     (void)sender;
     acuMenuAction(ACU_MENU_TEST);
-}
-- (void)unlock:(id)sender {
-    (void)sender;
-    acuMenuAction(ACU_MENU_UNLOCK);
 }
 - (void)diagnostics:(id)sender {
     (void)sender;
@@ -406,10 +463,10 @@ static void update_lid_automation_menu(void) {
         BOOL restored = register_global_hotkey(previous);
         update_hotkey_menu(previous, restored);
         NSAlert *alert = [NSAlert new];
-        alert.messageText = @"全局快捷键不可用";
+        alert.messageText = localized(@"alert.hotkey_unavailable.title");
         alert.informativeText =
-            @"该组合键已被其他应用占用，请选择另一个组合键。";
-        [alert addButtonWithTitle:@"确定"];
+            localized(@"alert.hotkey_unavailable.message");
+        [alert addButtonWithTitle:localized(@"button.ok")];
         [alert runModal];
         return;
     }
@@ -451,35 +508,43 @@ int acu_init_menu(void) {
             gStatusItem.button.title = @"ACU";
         }
         NSMenu *menu = [NSMenu new];
-        gStateItem = [[NSMenuItem alloc] initWithTitle:@"状态：未启用"
-                                                action:nil
-                                         keyEquivalent:@""];
+        menu.delegate = gMenuTarget;
+        gStateItem = [[NSMenuItem alloc]
+            initWithTitle:[NSString
+                              stringWithFormat:localized(@"state.format"),
+                                               localized(@"state.disabled")]
+                   action:nil
+            keyEquivalent:@""];
         [gStateItem setEnabled:NO];
         [menu addItem:gStateItem];
         [menu addItem:[NSMenuItem separatorItem]];
 
         gEnableMenuItem =
-            [[NSMenuItem alloc] initWithTitle:@"开启模拟锁屏"
+            [[NSMenuItem alloc] initWithTitle:localized(
+                                                  @"menu.enable_protection")
                                       action:@selector(enable:)
                                keyEquivalent:@""];
         gEnableMenuItem.target = gMenuTarget;
         [menu addItem:gEnableMenuItem];
 
         gKeepAwakeMenuItem =
-            [[NSMenuItem alloc] initWithTitle:@"仅阻止系统锁屏"
+            [[NSMenuItem alloc] initWithTitle:localized(@"menu.keep_awake")
                                       action:@selector(toggleKeepAwake:)
                                keyEquivalent:@""];
         gKeepAwakeMenuItem.target = gMenuTarget;
         [menu addItem:gKeepAwakeMenuItem];
 
         NSMenuItem *shieldBackgroundRootItem =
-            [[NSMenuItem alloc] initWithTitle:@"模拟锁屏背景"
+            [[NSMenuItem alloc] initWithTitle:localized(
+                                                  @"menu.shield_background")
                                       action:nil
                                keyEquivalent:@""];
         NSMenu *shieldBackgroundMenu =
-            [[NSMenu alloc] initWithTitle:@"模拟锁屏背景"];
+            [[NSMenu alloc] initWithTitle:localized(
+                                              @"menu.shield_background")];
         NSArray<NSString *> *backgroundTitles =
-            @[@"当前系统背景（不支持生成式墙纸）", @"纯黑"];
+            @[localized(@"menu.background.system"),
+              localized(@"menu.background.black")];
         NSMutableArray<NSMenuItem *> *backgroundItems =
             [NSMutableArray new];
         for (NSInteger index = 0; index < backgroundTitles.count; index++) {
@@ -498,18 +563,19 @@ int acu_init_menu(void) {
         [menu addItem:shieldBackgroundRootItem];
 
         gLidAutomationMenuItem =
-            [[NSMenuItem alloc] initWithTitle:@"半合盖自动保护"
+            [[NSMenuItem alloc] initWithTitle:localized(
+                                                  @"menu.lid_automation")
                                       action:@selector(toggleLidAutomation:)
                                keyEquivalent:@""];
         gLidAutomationMenuItem.target = gMenuTarget;
         [menu addItem:gLidAutomationMenuItem];
 
         gLidAngleRootItem =
-            [[NSMenuItem alloc] initWithTitle:@"半合盖触发角度"
+            [[NSMenuItem alloc] initWithTitle:localized(@"menu.lid_angle")
                                       action:nil
                                keyEquivalent:@""];
         NSMenu *lidAngleMenu =
-            [[NSMenu alloc] initWithTitle:@"半合盖触发角度"];
+            [[NSMenu alloc] initWithTitle:localized(@"menu.lid_angle")];
         NSMutableArray<NSMenuItem *> *lidAngleItems = [NSMutableArray new];
         for (NSNumber *threshold in @[@30, @45, @60]) {
             NSMenuItem *item =
@@ -527,36 +593,35 @@ int acu_init_menu(void) {
         gLidAngleRootItem.submenu = lidAngleMenu;
         [menu addItem:gLidAngleRootItem];
 
-        NSMenuItem *testProtection =
-            [[NSMenuItem alloc] initWithTitle:@"测试模拟锁屏（15 秒自动退出）"
+        gTestProtectionMenuItem =
+            [[NSMenuItem alloc] initWithTitle:localized(
+                                                  @"menu.test_protection")
                                       action:@selector(testProtection:)
                                keyEquivalent:@""];
-        testProtection.target = gMenuTarget;
-        [menu addItem:testProtection];
+        gTestProtectionMenuItem.target = gMenuTarget;
+        gTestProtectionMenuItem.hidden = YES;
+        [menu addItem:gTestProtectionMenuItem];
 
-        NSMenuItem *unlock = [[NSMenuItem alloc] initWithTitle:@"解除保护"
-                                                       action:@selector(unlock:)
-                                                keyEquivalent:@""];
-        unlock.target = gMenuTarget;
-        [menu addItem:unlock];
-
-        NSMenuItem *diagnostics =
-            [[NSMenuItem alloc] initWithTitle:@"权限诊断"
+        gDiagnosticsMenuItem =
+            [[NSMenuItem alloc] initWithTitle:localized(@"menu.diagnostics")
                                       action:@selector(diagnostics:)
                                keyEquivalent:@""];
-        diagnostics.target = gMenuTarget;
-        [menu addItem:diagnostics];
+        gDiagnosticsMenuItem.target = gMenuTarget;
+        gDiagnosticsMenuItem.hidden = YES;
+        [menu addItem:gDiagnosticsMenuItem];
 
         gHotKeyRootItem =
-            [[NSMenuItem alloc] initWithTitle:@"开启快捷键"
+            [[NSMenuItem alloc] initWithTitle:localized(@"menu.hotkey")
                                       action:nil
                                keyEquivalent:@""];
-        NSMenu *hotKeyMenu = [[NSMenu alloc] initWithTitle:@"开启快捷键"];
+        NSMenu *hotKeyMenu =
+            [[NSMenu alloc] initWithTitle:localized(@"menu.hotkey")];
         NSArray<NSString *> *titles = @[
-          @"⌃⌥⌘L（默认）",
+          [NSString stringWithFormat:@"⌃⌥⌘L%@",
+                                     localized(@"label.default")],
           @"⌃⌥⌘P",
           @"⌃⌥⌘A",
-          @"关闭全局快捷键",
+          localized(@"menu.hotkey.disabled"),
         ];
         NSMutableArray<NSMenuItem *> *items = [NSMutableArray new];
         for (NSInteger index = 0; index < titles.count; index++) {
@@ -574,9 +639,18 @@ int acu_init_menu(void) {
         [menu addItem:gHotKeyRootItem];
 
         [menu addItem:[NSMenuItem separatorItem]];
-        NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:@"退出"
-                                                     action:@selector(quit:)
-                                              keyEquivalent:@"q"];
+        gLaunchAtLoginMenuItem =
+            [[NSMenuItem alloc] initWithTitle:localized(
+                                                  @"menu.launch_at_login")
+                                      action:@selector(toggleLaunchAtLogin:)
+                               keyEquivalent:@""];
+        gLaunchAtLoginMenuItem.target = gMenuTarget;
+        [menu addItem:gLaunchAtLoginMenuItem];
+
+        NSMenuItem *quit =
+            [[NSMenuItem alloc] initWithTitle:localized(@"menu.quit")
+                                      action:@selector(quit:)
+                               keyEquivalent:@"q"];
         quit.target = gMenuTarget;
         [menu addItem:quit];
         gStatusItem.menu = menu;
@@ -596,9 +670,10 @@ int acu_init_menu(void) {
         initialize_lid_angle_sensor();
         update_lid_automation_menu();
         update_shield_background_menu();
+        update_launch_at_login_menu();
         // 进程重启后立即恢复防锁屏的勾选状态（不必等子进程上报 awake）。
         if (acu_keep_awake_persisted()) {
-            gKeepAwakeMenuItem.title = @"停止阻止系统锁屏";
+            gKeepAwakeMenuItem.title = localized(@"menu.keep_awake.stop");
             gKeepAwakeMenuItem.state = NSControlStateValueOn;
         }
         return 1;
@@ -619,20 +694,32 @@ void acu_stop_app(void) {
     });
 }
 
+char *acu_localized_string(const char *key) {
+    if (key == NULL) {
+        return NULL;
+    }
+    @autoreleasepool {
+        NSString *value =
+            localized([NSString stringWithUTF8String:key]);
+        return strdup(value.UTF8String);
+    }
+}
+
 void acu_set_menu_state(const char *state) {
     if (state == NULL) {
         return;
     }
     NSString *value = [NSString stringWithUTF8String:state];
     on_main_sync(^{
-      gStateItem.title = [NSString stringWithFormat:@"状态：%@", value];
+      gStateItem.title =
+          [NSString stringWithFormat:localized(@"state.format"), value];
     });
 }
 
 void acu_set_keep_awake_active(int active) {
     on_main_sync(^{
-      gKeepAwakeMenuItem.title =
-          active ? @"停止阻止系统锁屏" : @"仅阻止系统锁屏";
+      gKeepAwakeMenuItem.title = localized(
+          active ? @"menu.keep_awake.stop" : @"menu.keep_awake");
       gKeepAwakeMenuItem.state =
           active ? NSControlStateValueOn : NSControlStateValueOff;
     });
@@ -649,9 +736,11 @@ int acu_show_alert(const char *title, const char *message, int confirm) {
       NSAlert *alert = [NSAlert new];
       alert.messageText = alertTitle;
       alert.informativeText = alertMessage;
-      [alert addButtonWithTitle:confirm ? @"继续" : @"确定"];
+      [alert addButtonWithTitle:localized(
+                                    confirm ? @"button.continue"
+                                            : @"button.ok")];
       if (confirm) {
-          [alert addButtonWithTitle:@"取消"];
+          [alert addButtonWithTitle:localized(@"button.cancel")];
       }
       response = [alert runModal];
     });
@@ -689,9 +778,9 @@ static void restart_application(void) {
     }
 
     NSAlert *alert = [NSAlert new];
-    alert.messageText = @"无法重新启动 ACU";
+    alert.messageText = localized(@"alert.restart_failed.title");
     alert.informativeText = error.localizedDescription;
-    [alert addButtonWithTitle:@"确定"];
+    [alert addButtonWithTitle:localized(@"button.ok")];
     [alert runModal];
 }
 
@@ -709,11 +798,11 @@ static void monitor_permission_until_granted(uint32_t permission) {
       [NSApp activateIgnoringOtherApps:YES];
 
       NSAlert *alert = [NSAlert new];
-      alert.messageText = @"权限已启用";
+      alert.messageText = localized(@"alert.permission_enabled.title");
       alert.informativeText =
-          @"需要重新启动 ACU 才能可靠应用新的系统权限。";
-      [alert addButtonWithTitle:@"立即重启"];
-      [alert addButtonWithTitle:@"稍后"];
+          localized(@"alert.permission_enabled.message");
+      [alert addButtonWithTitle:localized(@"button.restart_now")];
+      [alert addButtonWithTitle:localized(@"button.later")];
       if ([alert runModal] == NSAlertFirstButtonReturn) {
           restart_application();
       }
@@ -739,10 +828,9 @@ void acu_show_preflight_alert(const char *title,
       NSAlert *alert = [NSAlert new];
       alert.messageText = alertTitle;
       if (needsAccessibility || needsListenEvents) {
-          alert.informativeText = [alertMessage stringByAppendingString:
-              @"\n\n操作步骤：\n"
-               "1. 在打开的系统设置页面中启用“ACU”。\n"
-               "2. 检测到授权后，按提示立即重启 ACU。"];
+          alert.informativeText = [alertMessage
+              stringByAppendingString:localized(
+                                          @"preflight.instructions")];
       } else {
           alert.informativeText = alertMessage;
       }
@@ -750,21 +838,25 @@ void acu_show_preflight_alert(const char *title,
       NSMutableArray<NSURL *> *settingsURLs = [NSMutableArray new];
       NSMutableArray<NSNumber *> *permissions = [NSMutableArray new];
       if (needsAccessibility) {
-          [alert addButtonWithTitle:@"打开辅助功能设置"];
+          [alert addButtonWithTitle:localized(
+                                        @"button.open_accessibility")];
           [settingsURLs addObject:[NSURL URLWithString:
               @"x-apple.systempreferences:com.apple.preference.security?"
                "Privacy_Accessibility"]];
           [permissions addObject:@(ACU_PREFLIGHT_ACCESSIBILITY)];
       }
       if (needsListenEvents) {
-          [alert addButtonWithTitle:@"打开输入监控设置"];
+          [alert addButtonWithTitle:localized(
+                                        @"button.open_input_monitoring")];
           [settingsURLs addObject:[NSURL URLWithString:
               @"x-apple.systempreferences:com.apple.preference.security?"
                "Privacy_ListenEvent"]];
           [permissions addObject:@(ACU_PREFLIGHT_LISTEN_EVENTS)];
       }
-      [alert addButtonWithTitle:
-          settingsURLs.count == 0 ? @"确定" : @"稍后"];
+      [alert addButtonWithTitle:localized(
+                                    settingsURLs.count == 0
+                                        ? @"button.ok"
+                                        : @"button.later")];
 
       NSInteger response = [alert runModal];
       NSInteger selectedIndex = response - NSAlertFirstButtonReturn;
@@ -1902,9 +1994,9 @@ static NSPanel *create_shield(NSScreen *screen) {
     NSString *statusText =
         gShieldCountdown >= 0
             ? [NSString stringWithFormat:
-                  @"模拟锁屏保护中\n按 Enter 认证，%d 秒后自动退出",
+                  localized(@"shield.countdown"),
                   gShieldCountdown]
-            : @"模拟锁屏保护中\n按 Enter 后使用 Touch ID 或系统密码认证";
+            : localized(@"shield.active");
     NSTextField *status = [NSTextField labelWithString:statusText];
     status.tag = ACUShieldStatusTag;
     status.textColor = [NSColor colorWithWhite:0.75 alpha:1.0];
@@ -2015,7 +2107,7 @@ void acu_set_shield_countdown(int seconds) {
           if (status != nil) {
               status.stringValue =
                   [NSString stringWithFormat:
-                      @"模拟锁屏保护中\n按 Enter 认证，%d 秒后自动退出",
+                      localized(@"shield.countdown"),
                       seconds];
           }
       }
@@ -2031,12 +2123,10 @@ void acu_show_input_guard_failure(void) {
       [NSApp activateIgnoringOtherApps:YES];
 
       NSAlert *alert = [NSAlert new];
-      alert.messageText = @"物理输入保护异常";
-      alert.informativeText =
-          @"ACU 无法恢复输入拦截，遮罩仍会保留。"
-           "请完成身份认证后退出保护并重新开启应用。";
-      [alert addButtonWithTitle:@"开始身份认证"];
-      [alert addButtonWithTitle:@"保持遮罩"];
+      alert.messageText = localized(@"alert.input_guard.title");
+      alert.informativeText = localized(@"alert.input_guard.message");
+      [alert addButtonWithTitle:localized(@"button.authenticate")];
+      [alert addButtonWithTitle:localized(@"button.keep_shield")];
       alert.window.level =
           CGWindowLevelForKey(kCGScreenSaverWindowLevelKey) + 1;
       alert.window.collectionBehavior =
@@ -2102,7 +2192,7 @@ int acu_authenticate(void) {
         });
 
         LAContext *context = [LAContext new];
-        context.localizedCancelTitle = @"保持保护";
+        context.localizedCancelTitle = localized(@"auth.cancel");
         NSError *error = nil;
         if (![context canEvaluatePolicy:LAPolicyDeviceOwnerAuthentication
                                   error:&error]) {
@@ -2112,7 +2202,7 @@ int acu_authenticate(void) {
         dispatch_semaphore_t done = dispatch_semaphore_create(0);
         __block BOOL success = NO;
         [context evaluatePolicy:LAPolicyDeviceOwnerAuthentication
-                localizedReason:@"解除 ACU 模拟锁屏"
+                localizedReason:localized(@"auth.reason")
                           reply:^(BOOL authenticated, NSError *replyError) {
                             (void)replyError;
                             success = authenticated;

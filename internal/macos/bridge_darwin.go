@@ -4,7 +4,7 @@ package macos
 
 /*
 #cgo CFLAGS: -x objective-c -fblocks -fobjc-arc
-#cgo LDFLAGS: -framework AppKit -framework ApplicationServices -framework AVFoundation -framework Carbon -framework ColorSync -framework CoreGraphics -framework CoreFoundation -framework IOKit -framework LocalAuthentication -framework QuartzCore
+#cgo LDFLAGS: -framework AppKit -framework ApplicationServices -framework AVFoundation -framework Carbon -framework ColorSync -framework CoreGraphics -framework CoreFoundation -framework IOKit -framework LocalAuthentication -framework QuartzCore -framework ServiceManagement
 #include <stdlib.h>
 #include "bridge.h"
 */
@@ -21,7 +21,6 @@ type MenuAction int
 const (
 	MenuEnable      MenuAction = C.ACU_MENU_ENABLE
 	MenuTest        MenuAction = C.ACU_MENU_TEST
-	MenuUnlock      MenuAction = C.ACU_MENU_UNLOCK
 	MenuDiagnostics MenuAction = C.ACU_MENU_DIAGNOSTICS
 	MenuQuit        MenuAction = C.ACU_MENU_QUIT
 	MenuKeepAwake   MenuAction = C.ACU_MENU_KEEP_AWAKE
@@ -120,6 +119,18 @@ func RunApp() {
 
 func StopApp() {
 	C.acu_stop_app()
+}
+
+func Localized(key string) string {
+	cKey := C.CString(key)
+	defer C.free(unsafe.Pointer(cKey))
+
+	value := C.acu_localized_string(cKey)
+	if value == nil {
+		return key
+	}
+	defer C.free(unsafe.Pointer(value))
+	return C.GoString(value)
 }
 
 func SetMenuState(state string) {
@@ -295,4 +306,12 @@ func RestorePowerSettings() bool {
 // KeepAwakePersisted 返回防锁屏是否被用户持久化开启（跨进程重启保存）。
 func KeepAwakePersisted() bool {
 	return C.acu_keep_awake_persisted() != 0
+}
+
+func SetKeepAwakePersisted(enabled bool) {
+	var value C.int
+	if enabled {
+		value = 1
+	}
+	C.acu_set_keep_awake_persisted(value)
 }

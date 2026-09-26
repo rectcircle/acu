@@ -61,11 +61,13 @@ func Run() error {
 	}
 	go controller.loop()
 	// 进程重启后，若用户之前持久化开启了防锁屏，则自动恢复。
-	// 持久化完全由 C 侧菜单回调（toggleKeepAwake:）管理，
-	// 这里只负责启动时按持久化值拉起子进程，绝不清除持久化。
+	// 退出应用只停止本次运行，不清除用户偏好。
 	if macos.KeepAwakePersisted() {
 		child, err := startGuardian(controller.childEvents, guardianModeKeepAwake, 0)
-		if err == nil {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "acu: restore persisted keep-awake:", err)
+			macos.SetMenuState(text("state.keep_awake_restore_failed"))
+		} else {
 			controller.child = child
 			controller.keepAwakeRequested = true
 		}
@@ -87,8 +89,6 @@ func (c *Controller) loop() {
 				c.toggleKeepAwake()
 			case macos.MenuTest:
 				c.enable(15)
-			case macos.MenuUnlock:
-				c.requestAuthentication()
 			case macos.MenuDiagnostics:
 				c.showDiagnostics()
 			case macos.MenuLidConfig:
@@ -161,7 +161,7 @@ func (c *Controller) pollLidAutomation(now time.Time) {
 func (c *Controller) checkLidAutomationPreflight() {
 	if failures := macos.Preflight(true); failures != 0 {
 		macos.ShowPreflightAlert(
-			"半合盖自动保护尚未就绪",
+			text("alert.lid_automation_not_ready.title"),
 			preflightMessage(failures),
 			failures,
 		)
@@ -175,12 +175,12 @@ func (c *Controller) enable(timeoutSeconds int) {
 		}
 		return
 	}
-	macos.SetMenuState("正在预检")
+	macos.SetMenuState(text("state.preflighting"))
 
 	if failures := macos.Preflight(true); failures != 0 {
-		macos.SetMenuState("启动失败")
+		macos.SetMenuState(text("state.start_failed"))
 		macos.ShowPreflightAlert(
-			"无法开启模拟锁屏",
+			text("alert.protection_enable_failed.title"),
 			preflightMessage(failures),
 			failures,
 		)
@@ -193,11 +193,11 @@ func (c *Controller) upgradeToProtection(timeoutSeconds int) {
 	if c.pendingProtection {
 		return
 	}
-	macos.SetMenuState("正在预检模拟锁屏")
+	macos.SetMenuState(text("state.preflighting_protection"))
 	if failures := macos.Preflight(true); failures != 0 {
-		macos.SetMenuState("仅防锁屏运行中")
+		macos.SetMenuState(text("state.keep_awake_active"))
 		macos.ShowPreflightAlert(
-			"无法开启模拟锁屏",
+			text("alert.protection_enable_failed.title"),
 			preflightMessage(failures),
 			failures,
 		)
@@ -206,12 +206,16 @@ func (c *Controller) upgradeToProtection(timeoutSeconds int) {
 
 	c.pendingProtection = true
 	c.pendingProtectionTimeout = timeoutSeconds
-	macos.SetMenuState("正在切换到模拟锁屏")
+	macos.SetMenuState(text("state.switching_to_protection"))
 	if err := c.child.conn.Write(ipc.Message{Type: "stop"}); err != nil {
 		c.pendingProtection = false
 		c.pendingProtectionTimeout = 0
-		macos.SetMenuState("仅防锁屏运行中")
-		macos.ShowAlert("无法切换到模拟锁屏", err.Error(), false)
+		macos.SetMenuState(text("state.keep_awake_active"))
+		macos.ShowAlert(
+			text("alert.protection_switch_failed.title"),
+			err.Error(),
+			false,
+		)
 	}
 }
 
@@ -222,16 +226,20 @@ func (c *Controller) startProtection(timeoutSeconds int) {
 		timeoutSeconds,
 	)
 	if err != nil {
-		macos.SetMenuState("启动失败")
-		macos.ShowAlert("Guardian 启动失败", err.Error(), false)
+		macos.SetMenuState(text("state.start_failed"))
+		macos.ShowAlert(
+			text("alert.guardian_start_failed.title"),
+			err.Error(),
+			false,
+		)
 		c.restoreKeepAwakeIfRequested()
 		return
 	}
 	c.child = child
 	if timeoutSeconds > 0 {
-		macos.SetMenuState("正在启动 15 秒测试")
+		macos.SetMenuState(text("state.starting_test"))
 	} else {
-		macos.SetMenuState("正在启动")
+		macos.SetMenuState(text("state.starting"))
 	}
 }
 
@@ -239,8 +247,8 @@ func (c *Controller) toggleKeepAwake() {
 	if c.child != nil {
 		if c.child.mode != guardianModeKeepAwake {
 			macos.ShowAlert(
-				"无法开启防锁屏",
-				"模拟锁屏正在运行，请先完成身份认证并解除保护。",
+				text("alert.keep_awake_enable_failed.title"),
+				text("alert.protection_active.message"),
 				false,
 			)
 			return
@@ -248,20 +256,21 @@ func (c *Controller) toggleKeepAwake() {
 		if c.pendingProtection {
 			return
 		}
-		macos.SetMenuState("正在停止防锁屏")
+		macos.SetMenuState(text("state.stopping_keep_awake"))
 		if err := c.child.conn.Write(ipc.Message{Type: "stop"}); err != nil {
-			macos.SetMenuState("停止防锁屏失败")
+			macos.SetMenuState(text("state.stop_keep_awake_failed"))
 		} else {
 			c.keepAwakeRequested = false
+			macos.SetKeepAwakePersisted(false)
 		}
 		return
 	}
 
-	macos.SetMenuState("正在预检防锁屏")
+	macos.SetMenuState(text("state.preflighting_keep_awake"))
 	if failures := macos.PreflightKeepAwake(true); failures != 0 {
-		macos.SetMenuState("启动失败")
+		macos.SetMenuState(text("state.start_failed"))
 		macos.ShowPreflightAlert(
-			"无法开启防锁屏",
+			text("alert.keep_awake_enable_failed.title"),
 			preflightMessage(failures),
 			failures,
 		)
@@ -274,13 +283,18 @@ func (c *Controller) toggleKeepAwake() {
 		0,
 	)
 	if err != nil {
-		macos.SetMenuState("启动失败")
-		macos.ShowAlert("防锁屏进程启动失败", err.Error(), false)
+		macos.SetMenuState(text("state.start_failed"))
+		macos.ShowAlert(
+			text("alert.keep_awake_process_start_failed.title"),
+			err.Error(),
+			false,
+		)
 		return
 	}
 	c.child = child
 	c.keepAwakeRequested = true
-	macos.SetMenuState("正在启动防锁屏")
+	macos.SetKeepAwakePersisted(true)
+	macos.SetMenuState(text("state.starting_keep_awake"))
 }
 
 func (c *Controller) requestAuthentication() {
@@ -300,11 +314,11 @@ func (c *Controller) quit() {
 	c.pendingProtection = false
 	c.pendingProtectionTimeout = 0
 	if c.child.mode == guardianModeKeepAwake {
-		macos.SetMenuState("正在停止防锁屏并退出")
+		macos.SetMenuState(text("state.stopping_keep_awake_and_quitting"))
 		_ = c.child.conn.Write(ipc.Message{Type: "stop"})
 		return
 	}
-	macos.SetMenuState("等待认证后退出")
+	macos.SetMenuState(text("state.waiting_auth_to_quit"))
 	c.requestAuthentication()
 }
 
@@ -312,18 +326,22 @@ func (c *Controller) showDiagnostics() {
 	failures := macos.Preflight(false)
 	policy := policyDescription()
 	message := fmt.Sprintf(
-		"技术预检：%s\n企业策略：%s\n铰链传感器：%s",
+		text("diagnostics.format"),
 		preflightSummary(failures),
 		policy,
 		lidSensorDescription(),
 	)
-	macos.ShowPreflightAlert("ACU 诊断", message, failures)
+	macos.ShowPreflightAlert(
+		text("alert.diagnostics.title"),
+		message,
+		failures,
+	)
 }
 
 func lidSensorDescription() string {
 	angle, ok := macos.ReadLidAngle()
 	if !ok {
-		return "不可用"
+		return text("diagnostics.unavailable")
 	}
 	return fmt.Sprintf("%.0f°", angle)
 }
@@ -349,11 +367,11 @@ func (c *Controller) handleChildEvent(event childEvent) {
 		if event.err != nil && !event.child.fatalReported {
 			c.pendingProtection = false
 			c.pendingProtectionTimeout = 0
-			title := "保护已失效"
-			message := "Guardian 已退出，应用层保护不再生效。"
+			title := text("state.protection_lost")
+			message := text("alert.protection_lost.message")
 			if event.child.mode == guardianModeKeepAwake {
-				title = "防锁屏已失效"
-				message = "防锁屏进程已异常退出。"
+				title = text("state.keep_awake_lost")
+				message = text("alert.keep_awake_lost.message")
 			}
 			macos.SetMenuState(title)
 			macos.ShowAlert(
@@ -375,15 +393,15 @@ func (c *Controller) handleChildEvent(event childEvent) {
 	case "state":
 		if event.message.State == "awake" {
 			macos.SetKeepAwakeActive(true)
-			macos.SetMenuState("仅防锁屏运行中")
+			macos.SetMenuState(text("state.keep_awake_active"))
 		} else if event.message.State == "degraded" &&
 			event.child.mode == guardianModeKeepAwake {
-			macos.SetMenuState("防锁屏异常")
+			macos.SetMenuState(text("state.keep_awake_error"))
 		} else if event.message.State == "disarming" &&
 			event.child.mode == guardianModeKeepAwake {
-			macos.SetMenuState("正在停止防锁屏")
+			macos.SetMenuState(text("state.stopping_keep_awake"))
 		} else if event.message.State == "protected" && event.child.testMode {
-			macos.SetMenuState("测试保护中（15 秒自动退出）")
+			macos.SetMenuState(text("state.test_active"))
 		} else {
 			macos.SetMenuState(displayState(event.message.State))
 		}
@@ -406,10 +424,10 @@ func (c *Controller) handleChildEvent(event childEvent) {
 		}
 	case "fatal":
 		event.child.fatalReported = true
-		macos.SetMenuState("启动失败")
+		macos.SetMenuState(text("state.start_failed"))
 		macos.ShowAlert(
-			"Guardian 启动失败",
-			"错误码："+event.message.Code,
+			text("alert.guardian_start_failed.title"),
+			fmt.Sprintf(text("alert.error_code.format"), event.message.Code),
 			false,
 		)
 	}
@@ -437,12 +455,16 @@ func (c *Controller) restoreKeepAwakeIfRequested() {
 	)
 	if err != nil {
 		c.keepAwakeRequested = false
-		macos.SetMenuState("恢复防锁屏失败")
-		macos.ShowAlert("防锁屏进程恢复失败", err.Error(), false)
+		macos.SetMenuState(text("state.keep_awake_restore_failed"))
+		macos.ShowAlert(
+			text("alert.keep_awake_restore_failed.title"),
+			err.Error(),
+			false,
+		)
 		return
 	}
 	c.child = child
-	macos.SetMenuState("正在恢复防锁屏")
+	macos.SetMenuState(text("state.restoring_keep_awake"))
 }
 
 func (c *Controller) shouldRestoreKeepAwake() bool {
@@ -548,13 +570,13 @@ func randomToken() (string, error) {
 func policyDescription() string {
 	switch policyStatus() {
 	case "managed":
-		return "检测到托管锁屏策略（不阻断功能）"
+		return text("policy.managed")
 	case "enrolled":
-		return "设备已纳管，未识别到具体锁屏策略"
+		return text("policy.enrolled")
 	case "unknown":
-		return "检测失败"
+		return text("policy.unknown")
 	default:
-		return "未发现相关托管策略"
+		return text("policy.allowed")
 	}
 }
 
@@ -577,33 +599,36 @@ func policyStatus() string {
 }
 
 func preflightMessage(failures macos.PreflightFailures) string {
-	return "请处理以下问题后重试：\n" + preflightSummary(failures)
+	return fmt.Sprintf(
+		text("preflight.retry.format"),
+		preflightSummary(failures),
+	)
 }
 
 func preflightSummary(failures macos.PreflightFailures) string {
 	if failures == 0 {
-		return "全部通过"
+		return text("preflight.all_passed")
 	}
 	var problems []string
 	if failures&macos.FailureAccessibility != 0 {
-		problems = append(problems, "未授予辅助功能权限")
+		problems = append(problems, text("preflight.accessibility"))
 	}
 	if failures&macos.FailureListenEvents != 0 &&
 		failures&macos.FailureAccessibility == 0 {
-		problems = append(problems, "无法监听输入事件")
+		problems = append(problems, text("preflight.listen_events"))
 	}
 	if failures&macos.FailurePostEvents != 0 &&
 		failures&macos.FailureAccessibility == 0 {
-		problems = append(problems, "无法投递合成事件")
+		problems = append(problems, text("preflight.post_events"))
 	}
 	if failures&macos.FailureAuth != 0 {
-		problems = append(problems, "设备所有者认证不可用")
+		problems = append(problems, text("preflight.authentication"))
 	}
 	if failures&macos.FailureDisplay != 0 {
-		problems = append(problems, "没有可用显示器")
+		problems = append(problems, text("preflight.display"))
 	}
 	if failures&macos.FailureSessionLocked != 0 {
-		problems = append(problems, "当前系统会话已锁定")
+		problems = append(problems, text("preflight.session_locked"))
 	}
 	return strings.Join(problems, "\n")
 }
@@ -611,18 +636,22 @@ func preflightSummary(failures macos.PreflightFailures) string {
 func displayState(state string) string {
 	switch state {
 	case "protected":
-		return "模拟锁屏保护中"
+		return text("state.protected")
 	case "awake":
-		return "仅防锁屏运行中"
+		return text("state.keep_awake_active")
 	case "authenticating":
-		return "正在进行身份认证"
+		return text("state.authenticating")
 	case "disarming":
-		return "正在解除保护"
+		return text("state.disarming")
 	case "degraded":
-		return "保护降级"
+		return text("state.degraded")
 	case "failed":
-		return "启动失败"
+		return text("state.start_failed")
 	default:
-		return "未启用"
+		return text("state.disabled")
 	}
+}
+
+func text(key string) string {
+	return macos.Localized(key)
 }

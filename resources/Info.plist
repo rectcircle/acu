@@ -4,7 +4,7 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key>
-  <string>zh_CN</string>
+  <string>en</string>
   <key>CFBundleExecutable</key>
   <string>acu</string>
   <key>CFBundleIdentifier</key>
@@ -13,6 +13,11 @@
   <string>AppIcon</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
+  <key>CFBundleLocalizations</key>
+  <array>
+    <string>en</string>
+    <string>zh-Hans</string>
+  </array>
   <key>CFBundleName</key>
   <string>ACU</string>
   <key>CFBundlePackageType</key>
@@ -22,7 +27,7 @@
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>
-  <string>13.0</string>
+  <string>15.0</string>
   <key>LSUIElement</key>
   <true/>
   <key>NSHighResolutionCapable</key>

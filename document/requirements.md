@@ -237,7 +237,7 @@ ACU 提供的是应用层的“隐私保护模式”，不是 macOS 真锁屏：
 ### NFR-3 兼容性
 
 - 仅支持 Apple Silicon 和 Intel 的 macOS。
-- MVP 最低版本建议为 macOS 13。
+- MVP 最低版本为 macOS 15。
 - Touch ID 不可用时必须支持系统密码回退。
 - 多显示器、显示器热插拔和全屏 Space 必须纳入验收。
 

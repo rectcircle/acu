@@ -14,7 +14,7 @@ func TestPreflightSummaryPrioritizesAccessibility(t *testing.T) {
 
 	summary := preflightSummary(failures)
 
-	if summary != "未授予辅助功能权限" {
+	if summary != macos.Localized("preflight.accessibility") {
 		t.Fatalf("unexpected summary: %q", summary)
 	}
 }
@@ -22,7 +22,10 @@ func TestPreflightSummaryPrioritizesAccessibility(t *testing.T) {
 func TestPreflightSummaryReportsIndependentListenFailure(t *testing.T) {
 	summary := preflightSummary(macos.FailureListenEvents)
 
-	if !strings.Contains(summary, "无法监听输入事件") {
+	if !strings.Contains(
+		summary,
+		macos.Localized("preflight.listen_events"),
+	) {
 		t.Fatalf("unexpected summary: %q", summary)
 	}
 }
