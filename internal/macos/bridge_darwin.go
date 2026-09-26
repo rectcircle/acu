@@ -4,7 +4,7 @@ package macos
 
 /*
 #cgo CFLAGS: -x objective-c -fblocks -fobjc-arc
-#cgo LDFLAGS: -framework AppKit -framework ApplicationServices -framework AVFoundation -framework Carbon -framework ColorSync -framework CoreGraphics -framework CoreFoundation -framework IOKit -framework LocalAuthentication -framework QuartzCore -framework Security
+#cgo LDFLAGS: -framework AppKit -framework ApplicationServices -framework AVFoundation -framework Carbon -framework ColorSync -framework CoreGraphics -framework CoreFoundation -framework IOKit -framework LocalAuthentication -framework QuartzCore
 #include <stdlib.h>
 #include "bridge.h"
 */

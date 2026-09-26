@@ -7,7 +7,6 @@
 #import <ColorSync/ColorSync.h>
 #import <IOKit/hid/IOHIDManager.h>
 #import <LocalAuthentication/LocalAuthentication.h>
-#import <Security/Security.h>
 #import <IOKit/graphics/IOGraphicsLib.h>
 #import <dispatch/dispatch.h>
 #import <dlfcn.h>
@@ -54,8 +53,6 @@ static NSString *const ACUShieldBackgroundPreferenceKey =
     @"ACUShieldBackgroundStyle";
 static NSString *const ACUShieldVerticalConstraintIdentifier =
     @"ACUShieldVerticalConstraint";
-static NSString *const ACUTrustedTeamIdentifiersKey =
-    @"ACUTrustedTeamIdentifiers";
 static NSString *const ACULidAutomationEnabledKey =
     @"ACULidAutomationEnabled";
 static NSString *const ACUKeepAwakeEnabledKey =
@@ -73,9 +70,6 @@ static int gEventStartResult;
 static uint64_t gEventMarker;
 static atomic_bool gAuthenticationMode;
 static atomic_int gAuthenticationPID;
-static atomic_int gTrustedPIDs[64];
-static atomic_size_t gTrustedPIDCount;
-static atomic_uint_fast64_t gTrustedPIDGeneration;
 
 static BOOL gBrightnessSaved;
 
@@ -937,102 +931,6 @@ int acu_preflight_keep_awake(int request_permissions) {
     return failures;
 }
 
-static NSString *team_identifier_for_pid(pid_t pid) {
-    NSDictionary *attributes = @{
-      (__bridge NSString *)kSecGuestAttributePid : @(pid),
-    };
-    SecCodeRef code = NULL;
-    if (SecCodeCopyGuestWithAttributes(
-            NULL,
-            (__bridge CFDictionaryRef)attributes,
-            kSecCSDefaultFlags,
-            &code) != errSecSuccess ||
-        code == NULL) {
-        return nil;
-    }
-
-    CFDictionaryRef signingInformation = NULL;
-    OSStatus status =
-        SecCodeCopySigningInformation(
-            code, kSecCSSigningInformation, &signingInformation);
-    CFRelease(code);
-    if (status != errSecSuccess || signingInformation == NULL) {
-        return nil;
-    }
-
-    NSDictionary *information =
-        (__bridge NSDictionary *)signingInformation;
-    NSString *teamIdentifier =
-        information[(__bridge NSString *)kSecCodeInfoTeamIdentifier];
-    NSString *result = [teamIdentifier copy];
-    CFRelease(signingInformation);
-    return result;
-}
-
-static void clear_trusted_pids(void) {
-    atomic_store_explicit(&gTrustedPIDCount, 0, memory_order_release);
-}
-
-static void refresh_trusted_pids(uint64_t generation) {
-    pid_t trustedPIDs[64];
-    size_t trustedPIDCount = 0;
-    id stored =
-        [[NSUserDefaults standardUserDefaults]
-            objectForKey:ACUTrustedTeamIdentifiersKey];
-    if (![stored isKindOfClass:[NSArray class]]) {
-        return;
-    }
-    NSSet<NSString *> *trustedTeams =
-        [NSSet setWithArray:(NSArray<NSString *> *)stored];
-    if (trustedTeams.count == 0) {
-        return;
-    }
-
-    for (NSRunningApplication *application
-             in [[NSWorkspace sharedWorkspace] runningApplications]) {
-        NSString *teamIdentifier =
-            team_identifier_for_pid(application.processIdentifier);
-        BOOL trusted =
-            teamIdentifier != nil &&
-            [trustedTeams containsObject:teamIdentifier];
-        if (trusted && trustedPIDCount < 64) {
-            trustedPIDs[trustedPIDCount++] = application.processIdentifier;
-        }
-    }
-
-    if (generation != atomic_load_explicit(
-                          &gTrustedPIDGeneration, memory_order_acquire)) {
-        return;
-    }
-    for (size_t index = 0; index < trustedPIDCount; index++) {
-        atomic_store_explicit(
-            &gTrustedPIDs[index], trustedPIDs[index], memory_order_relaxed);
-    }
-    atomic_store_explicit(
-        &gTrustedPIDCount, trustedPIDCount, memory_order_release);
-}
-
-static void refresh_trusted_pids_async(uint64_t generation) {
-    dispatch_async(
-        dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-          @autoreleasepool {
-              refresh_trusted_pids(generation);
-          }
-        });
-}
-
-static bool is_trusted_pid(pid_t pid) {
-    size_t count =
-        atomic_load_explicit(&gTrustedPIDCount, memory_order_acquire);
-    for (size_t index = 0; index < count; index++) {
-        if (atomic_load_explicit(
-                &gTrustedPIDs[index], memory_order_relaxed) == pid) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static BOOL refresh_authentication_pid(void) {
     __block pid_t authenticationPID = 0;
     __block pid_t fallbackPID = 0;
@@ -1088,9 +986,6 @@ static CGEventRef event_callback(CGEventTapProxy proxy,
 
     if (atomic_load(&gAuthenticationMode)) {
         if (!physical) {
-            return NULL;
-        }
-        if (type == kCGEventMouseMoved) {
             return event;
         }
 
@@ -1114,13 +1009,11 @@ static CGEventRef event_callback(CGEventTapProxy proxy,
         return NULL;
     }
 
-    if (!physical && is_trusted_pid((pid_t)sourcePID)) {
+    if (!physical) {
         return event;
     }
 
-    if (physical) {
-        acuPhysicalActivity();
-    }
+    acuPhysicalActivity();
 
     if (type == kCGEventKeyDown) {
         int64_t keycode =
@@ -1213,10 +1106,6 @@ int acu_start_input_guard(uint64_t marker) {
         return 1;
     }
     gEventMarker = marker;
-    uint64_t trustedPIDGeneration =
-        atomic_fetch_add_explicit(
-            &gTrustedPIDGeneration, 1, memory_order_acq_rel) + 1;
-    clear_trusted_pids();
     gEventStarted = 0;
     gEventStartResult = 0;
     atomic_store(&gAuthenticationMode, false);
@@ -1234,14 +1123,10 @@ int acu_start_input_guard(uint64_t marker) {
         pthread_join(gEventThread, NULL);
         return result;
     }
-    refresh_trusted_pids_async(trustedPIDGeneration);
     return result;
 }
 
 void acu_stop_input_guard(void) {
-    atomic_fetch_add_explicit(
-        &gTrustedPIDGeneration, 1, memory_order_acq_rel);
-    clear_trusted_pids();
     pthread_mutex_lock(&gEventMutex);
     CFRunLoopRef runLoop = gEventRunLoop;
     if (runLoop != NULL) {

@@ -12,7 +12,7 @@ Menu Controller
   └─ 启动 Guardian 子进程
        ├─ Idle Keeper：空闲时轻微移动并恢复鼠标
        └─ 模拟锁屏模式
-            ├─ Quartz Event Tap：过滤物理输入、放行可信合成输入
+            ├─ Quartz Event Tap：过滤物理输入、放行软件合成输入
             ├─ AppKit Shield Windows：覆盖全部显示器
             └─ LocalAuthentication：密码或 Touch ID 认证后解除
 ```
@@ -355,7 +355,7 @@ sharingType        = none
 - 视频使用 `AVQueuePlayer + AVPlayerLooper` 播放；亮度降至 `0` 后暂停，恢复亮度时继续。
 - 产品名和状态文字每 60 秒在垂直方向移动 `12pt`，退出保护时销毁定时器。
 - Window 不成为 key/main window。
-- `ignoresMouseEvents = true`，让可信自动化客户端的合成事件命中底层目标应用。
+- `ignoresMouseEvents = true`，让自动化客户端的合成事件命中底层目标应用。
 - 物理鼠标由 Event Tap 消费。
 
 认证态：
@@ -414,9 +414,8 @@ Event Tap 回调只做常量时间判断，不调用 Go 网络、文件或阻塞
 
 ```text
 HelperSynthetic
-TrustedClientSynthetic
+SoftwareSynthetic
 Physical
-Unknown
 ```
 
 判定输入：
@@ -424,31 +423,26 @@ Unknown
 - `kCGEventSourceUserData`
 - `kCGEventSourceUnixProcessID`
 - `kCGEventSourceStateID`
-- 本机配置的可信代码签名 Team ID
 
 默认策略：
 
 | 来源 | 普通保护态 | 认证态 |
 |---|---|---|
 | HelperSynthetic | 放行 | 放行 |
-| TrustedClientSynthetic | 放行 | 暂停 |
+| SoftwareSynthetic | 放行 | 放行 |
 | Physical Enter keyDown | 消费并发起认证 | 消费重复请求 |
 | 其他 Physical | 消费 | 定向投递给 LocalAuthentication UI |
-| Unknown | 消费 | 消费 |
 
 认证态不得直接放行原始物理事件。Native Bridge 缓存
 `com.apple.LocalAuthentication.UIAgent` 的 PID，消费原事件后使用 `CGEventPostToPid`
-定向投递；未找到认证进程时采用安全默认并消费事件。鼠标移动可保留，以便用户定位认证
-面板，点击和键盘事件不得落入底层应用。
+定向投递；未找到认证进程时采用安全默认并消费事件。所有物理鼠标和键盘事件均不原样
+透传到底层应用。
 
-可信自动化客户端发现策略：
+`stateID == kCGEventSourceStateHIDSystemState` 或没有有效来源 PID 的事件按物理输入处理；
+其他具有来源 PID 的非 HID 事件按软件合成输入处理。不维护客户端白名单，也不按进程名、
+Bundle ID、签名 Team ID 或安装路径筛选软件输入。
 
-1. 用户通过通用配置脚本选择已签名的自动化客户端。
-2. 脚本只把代码签名 Team ID 写入本机偏好设置，不写入仓库或应用二进制。
-3. Guardian 从 `NSRunningApplication` 枚举进程并校验其代码签名 Team ID。
-4. 只缓存当前运行实例的 PID，不通过进程名称、Bundle ID 前缀或安装路径直接信任。
-
-诊断信息可记录事件种类和分类结果，但禁止记录具体键值、客户端标识或签名信息。
+诊断信息可记录事件种类和分类结果，但禁止记录具体键值或客户端标识。
 
 ### 8.3 Enter 语义
 
@@ -554,7 +548,7 @@ keys: DisableScreenLockImmediate
 
 - 创建可过滤的 Event Tap；
 - 投递合成鼠标事件；
-- 识别和放行已配置自动化客户端的输入。
+- 区分物理输入与软件合成输入。
 
 API：
 
@@ -599,7 +593,6 @@ type NativeShield interface {
 
 type InputGuard interface {
 	Start(policy InputPolicy) error
-	UpdateTrustedProcesses(processes []TrustedProcess) error
 	Stop() error
 }
 
@@ -642,7 +635,6 @@ post_event_denied
 local_auth_unavailable
 no_displays
 session_already_locked
-trusted_runtime_unverified
 ```
 
 企业策略检测不是运行错误，使用独立的诊断原因码，例如
@@ -668,7 +660,6 @@ acu-helper/
       service.go
     input/
       classifier.go
-      trusted_process.go
     policy/
       probe.go
     ipc/
@@ -732,7 +723,6 @@ cgo 链接：
 -framework CoreFoundation
 -framework IOKit
 -framework LocalAuthentication
--framework Security
 ```
 
 ### 14.2 签名
@@ -776,7 +766,7 @@ cgo 链接：
 - IPC 大小限制、坏消息和 EOF。
 - controller EOF 后 Guardian 保持策略。
 - policy decision 合并。
-- trusted PID 启动时间和 PID 复用检测。
+- 物理输入与软件合成输入分类。
 - 半合盖防抖、展开迟滞、手动保护隔离和闭盖外接屏抑制。
 
 ### 17.2 Native 测试
@@ -797,14 +787,14 @@ cgo 链接：
 2. macOS 13、14、15，以及开发时最新版本。
 3. 单屏、双屏、显示器热插拔。
 4. 普通窗口、全屏 App、多个 Space。
-5. 已配置自动化客户端的核心采集与交互操作。
+5. 自动化客户端的核心采集与交互操作。
 6. 物理鼠标、键盘、触控板。
 7. Touch ID 和密码回退。
 8. controller kill、Event Tap disable、权限撤销。
 9. 系统锁屏时间设置为 1 分钟的长时间运行。
 10. 各 managed preference 结果不会触发开启弹窗或阻断 Guardian 启动。
 11. 权限诊断可展示设备纳管和策略检测失败状态。
-12. 认证面板打开时，物理输入和自动化客户端合成输入不会写入底层应用。
+12. 认证面板打开时，物理输入只进入认证 UI，软件合成输入继续按原目标投递。
 13. 全局快捷键默认值、预设切换、持久化、关闭和保护态幂等行为。
 14. 半合盖触发、展开认证、快速开合防抖和完全合盖外接显示器抑制。
 
@@ -812,7 +802,7 @@ cgo 链接：
 
 ### Phase 1：原生能力 PoC
 
-- Event Tap 分类物理输入与可信客户端合成事件。
+- Event Tap 分类物理输入与软件合成事件。
 - 1 像素 nudge 能稳定延后锁屏。
 - Shield Window 不影响目标窗口截图。
 - LocalAuthentication 能在遮罩上完成认证。
@@ -838,7 +828,7 @@ cgo 链接：
 
 1. 使用原生 LocalAuthentication，不自行处理系统密码。
 2. 使用应用层遮罩，不伪装成真正的 macOS 锁屏。
-3. 使用 Event Tap 区分物理输入和可信自动化客户端合成输入。
+3. 使用 Event Tap 区分物理输入和软件合成输入。
 4. 使用轻微鼠标活动，不永久修改系统电源/锁屏设置。
 5. 使用双进程，让 Guardian 在 controller 故障后仍可认证退出。
 6. 企业策略检测只用于权限诊断，不弹窗、不阻断功能；不修改或规避 MDM 配置。
