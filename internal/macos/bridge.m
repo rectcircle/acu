@@ -9,8 +9,10 @@
 #import <IOKit/graphics/IOGraphicsLib.h>
 #import <dispatch/dispatch.h>
 #import <dlfcn.h>
+#import <math.h>
 #import <pthread.h>
 #import <stdatomic.h>
+#import <stdio.h>
 #import <unistd.h>
 
 static NSStatusItem *gStatusItem;
@@ -1421,18 +1423,18 @@ int acu_authenticate(void) {
 
 #define ACU_MAX_DISPLAYS 16
 
-typedef int (*ACUDisplayServicesCanChangeBrightness)(
+typedef bool (*ACUDisplayServicesCanChangeBrightness)(
     CGDirectDisplayID display);
-typedef int (*ACUDisplayServicesGetBrightness)(
+typedef int (*ACUDisplayServicesGetLinearBrightness)(
     CGDirectDisplayID display,
     float *brightness);
-typedef int (*ACUDisplayServicesSetBrightness)(
+typedef int (*ACUDisplayServicesSetLinearBrightness)(
     CGDirectDisplayID display,
     float brightness);
 
 typedef enum {
     ACUBrightnessBackendNone,
-    ACUBrightnessBackendDisplayServices,
+    ACUBrightnessBackendDisplayServicesLinear,
     ACUBrightnessBackendIODisplay,
 } ACUBrightnessBackend;
 
@@ -1444,8 +1446,8 @@ static struct {
 } gDisplayBrightness[ACU_MAX_DISPLAYS];
 static pthread_mutex_t gBrightnessMutex = PTHREAD_MUTEX_INITIALIZER;
 static ACUDisplayServicesCanChangeBrightness gCanChangeBrightness;
-static ACUDisplayServicesGetBrightness gGetBrightness;
-static ACUDisplayServicesSetBrightness gSetBrightness;
+static ACUDisplayServicesGetLinearBrightness gGetLinearBrightness;
+static ACUDisplayServicesSetLinearBrightness gSetLinearBrightness;
 
 static void initialize_display_services(void) {
     static dispatch_once_t once;
@@ -1460,17 +1462,17 @@ static void initialize_display_services(void) {
       gCanChangeBrightness =
           (ACUDisplayServicesCanChangeBrightness)dlsym(
               framework, "DisplayServicesCanChangeBrightness");
-      gGetBrightness =
-          (ACUDisplayServicesGetBrightness)dlsym(
-              framework, "DisplayServicesGetBrightness");
-      gSetBrightness =
-          (ACUDisplayServicesSetBrightness)dlsym(
-              framework, "DisplayServicesSetBrightness");
-      if (gCanChangeBrightness == NULL || gGetBrightness == NULL ||
-          gSetBrightness == NULL) {
+      gGetLinearBrightness =
+          (ACUDisplayServicesGetLinearBrightness)dlsym(
+              framework, "DisplayServicesGetLinearBrightness");
+      gSetLinearBrightness =
+          (ACUDisplayServicesSetLinearBrightness)dlsym(
+              framework, "DisplayServicesSetLinearBrightness");
+      if (gCanChangeBrightness == NULL || gGetLinearBrightness == NULL ||
+          gSetLinearBrightness == NULL) {
           gCanChangeBrightness = NULL;
-          gGetBrightness = NULL;
-          gSetBrightness = NULL;
+          gGetLinearBrightness = NULL;
+          gSetLinearBrightness = NULL;
       }
     });
 }
@@ -1481,6 +1483,10 @@ static io_service_t io_display_service(CGDirectDisplayID display) {
         return IODisplayForFramebuffer(framebuffer, 0);
     }
     return MACH_PORT_NULL;
+}
+
+static BOOL valid_brightness(float brightness) {
+    return isfinite(brightness) && brightness >= 0.0f && brightness <= 1.0f;
 }
 
 static void clear_display_brightness(void) {
@@ -1495,11 +1501,16 @@ static void clear_display_brightness(void) {
 int acu_save_power_settings(void) {
     CGDirectDisplayID displays[ACU_MAX_DISPLAYS];
     uint32_t displayCount = 0;
-    if (CGGetOnlineDisplayList(ACU_MAX_DISPLAYS, displays, &displayCount) !=
-        kCGErrorSuccess) {
+    CGError listResult =
+        CGGetOnlineDisplayList(ACU_MAX_DISPLAYS, displays, &displayCount);
+    if (listResult != kCGErrorSuccess) {
+        fprintf(stderr,
+                "acu-helper: list displays for dimming failed: %d\n",
+                listResult);
         return 0;
     }
-    uint32_t count = displayCount > ACU_MAX_DISPLAYS ? ACU_MAX_DISPLAYS : displayCount;
+    uint32_t count =
+        displayCount > ACU_MAX_DISPLAYS ? ACU_MAX_DISPLAYS : displayCount;
 
     pthread_mutex_lock(&gBrightnessMutex);
     if (gBrightnessSaved) {
@@ -1513,33 +1524,55 @@ int acu_save_power_settings(void) {
     for (uint32_t i = 0; i < count; i++) {
         float current = 0;
         ACUBrightnessBackend backend = ACUBrightnessBackendNone;
-        int readResult = kIOReturnError;
-        int writeResult = kIOReturnError;
 
         if (gCanChangeBrightness != NULL &&
-            gCanChangeBrightness(displays[i]) != 0) {
-            readResult = gGetBrightness(displays[i], &current);
-            writeResult = readResult == kIOReturnSuccess
-                ? gSetBrightness(displays[i], 0.0f)
-                : kIOReturnError;
+            gCanChangeBrightness(displays[i])) {
+            // The regular brightness value is the user-slider domain and may
+            // exceed the current panel output while auto brightness is active.
+            int readResult =
+                gGetLinearBrightness(displays[i], &current);
             if (readResult == kIOReturnSuccess &&
-                writeResult == kIOReturnSuccess) {
-                backend = ACUBrightnessBackendDisplayServices;
+                valid_brightness(current)) {
+                int writeResult =
+                    gSetLinearBrightness(displays[i], 0.0f);
+                if (writeResult == kIOReturnSuccess) {
+                    backend = ACUBrightnessBackendDisplayServicesLinear;
+                } else {
+                    fprintf(
+                        stderr,
+                        "acu-helper: dim display 0x%x failed: %d\n",
+                        displays[i],
+                        writeResult);
+                    (void)gSetLinearBrightness(displays[i], current);
+                    continue;
+                }
             }
         }
 
         if (backend == ACUBrightnessBackendNone) {
             io_service_t service = io_display_service(displays[i]);
             if (service != MACH_PORT_NULL) {
-                readResult = IODisplayGetFloatParameter(
+                int readResult = IODisplayGetFloatParameter(
                     service, 0, CFSTR("brightness"), &current);
-                writeResult = readResult == kIOReturnSuccess
-                    ? IODisplaySetFloatParameter(
-                          service, 0, CFSTR("brightness"), 0.0f)
-                    : kIOReturnError;
                 if (readResult == kIOReturnSuccess &&
-                    writeResult == kIOReturnSuccess) {
-                    backend = ACUBrightnessBackendIODisplay;
+                    valid_brightness(current)) {
+                    int writeResult = IODisplaySetFloatParameter(
+                        service, 0, CFSTR("brightness"), 0.0f);
+                    if (writeResult == kIOReturnSuccess) {
+                        backend = ACUBrightnessBackendIODisplay;
+                    } else {
+                        fprintf(
+                            stderr,
+                            "acu-helper: dim display 0x%x via IODisplay "
+                            "failed: %d\n",
+                            displays[i],
+                            writeResult);
+                        (void)IODisplaySetFloatParameter(
+                            service,
+                            0,
+                            CFSTR("brightness"),
+                            current);
+                    }
                 }
                 IOObjectRelease(service);
             }
@@ -1573,9 +1606,9 @@ int acu_restore_power_settings(void) {
         }
         int result = kIOReturnError;
         if (gDisplayBrightness[i].backend ==
-                ACUBrightnessBackendDisplayServices &&
-            gSetBrightness != NULL) {
-            result = gSetBrightness(
+                ACUBrightnessBackendDisplayServicesLinear &&
+            gSetLinearBrightness != NULL) {
+            result = gSetLinearBrightness(
                 gDisplayBrightness[i].display,
                 gDisplayBrightness[i].brightness);
         } else if (gDisplayBrightness[i].backend ==
@@ -1592,6 +1625,10 @@ int acu_restore_power_settings(void) {
             }
         }
         if (result != kIOReturnSuccess) {
+            fprintf(stderr,
+                    "acu-helper: restore display 0x%x brightness failed: %d\n",
+                    gDisplayBrightness[i].display,
+                    result);
             restored = NO;
         }
     }
