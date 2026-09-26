@@ -9,6 +9,8 @@
   <string>acu-helper</string>
   <key>CFBundleIdentifier</key>
   <string>github.com.rectcircle.acu-helper</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>

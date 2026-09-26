@@ -2,7 +2,9 @@
 
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
+#import <AVFoundation/AVFoundation.h>
 #import <Carbon/Carbon.h>
+#import <ColorSync/ColorSync.h>
 #import <IOKit/hid/IOHIDManager.h>
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <Security/Security.h>
@@ -10,6 +12,7 @@
 #import <dispatch/dispatch.h>
 #import <dlfcn.h>
 #import <math.h>
+#import <objc/message.h>
 #import <pthread.h>
 #import <stdatomic.h>
 #import <stdio.h>
@@ -22,12 +25,19 @@ static NSMenuItem *gKeepAwakeMenuItem;
 static NSMenuItem *gLidAutomationMenuItem;
 static NSMenuItem *gLidAngleRootItem;
 static NSArray<NSMenuItem *> *gLidAngleMenuItems;
+static NSArray<NSMenuItem *> *gShieldBackgroundMenuItems;
 static NSMenuItem *gHotKeyRootItem;
 static NSArray<NSMenuItem *> *gHotKeyMenuItems;
 static NSMutableArray<NSPanel *> *gShieldWindows;
+static NSTimer *gShieldMotionTimer;
+static NSMutableDictionary<NSString *, NSURLSessionDownloadTask *>
+    *gShieldVideoDownloads;
 static id gMenuTarget;
 static id gScreenObserver;
 static int gShieldCountdown = -1;
+static CGFloat gShieldMotionOffset;
+static BOOL gShieldMotionMovesUp = YES;
+static BOOL gShieldAnimationEnabled = YES;
 static BOOL gInputGuardFailureVisible;
 static NSTimer *gPermissionPollTimer;
 static IOHIDDeviceRef gLidAngleDevice;
@@ -40,6 +50,10 @@ static BOOL gLidAngleKnown;
 
 static const NSInteger ACUShieldStatusTag = 1001;
 static NSString *const ACUHotKeyPreferenceKey = @"ACUGlobalHotKeyPreset";
+static NSString *const ACUShieldBackgroundPreferenceKey =
+    @"ACUShieldBackgroundStyle";
+static NSString *const ACUShieldVerticalConstraintIdentifier =
+    @"ACUShieldVerticalConstraint";
 static NSString *const ACUTrustedTeamIdentifiersKey =
     @"ACUTrustedTeamIdentifiers";
 static NSString *const ACULidAutomationEnabledKey =
@@ -79,6 +93,14 @@ typedef NS_ENUM(NSInteger, ACUHotKeyPreset) {
 static const OSType ACUHotKeySignature = 0x41435548; // ACUH
 static const UInt32 ACUHotKeyIdentifier = 1;
 static const NSInteger ACULidDefaultThreshold = 45;
+static const CGFloat ACUShieldTitleBaseOffset = -24.0;
+static const CGFloat ACUShieldMotionDistance = 12.0;
+static const NSTimeInterval ACUShieldMotionInterval = 60.0;
+
+typedef NS_ENUM(NSInteger, ACUShieldBackgroundStyle) {
+    ACUShieldBackgroundSystem = 0,
+    ACUShieldBackgroundBlack = 1,
+};
 
 static BOOL initialize_lid_angle_sensor(void);
 static void update_lid_automation_menu(void);
@@ -200,6 +222,25 @@ static BOOL lid_automation_enabled(void) {
     return stored == nil ? YES : [stored boolValue];
 }
 
+static ACUShieldBackgroundStyle shield_background_style(void) {
+    NSInteger style =
+        [[NSUserDefaults standardUserDefaults]
+            integerForKey:ACUShieldBackgroundPreferenceKey];
+    if (style != ACUShieldBackgroundSystem &&
+        style != ACUShieldBackgroundBlack) {
+        return ACUShieldBackgroundSystem;
+    }
+    return (ACUShieldBackgroundStyle)style;
+}
+
+static void update_shield_background_menu(void) {
+    ACUShieldBackgroundStyle style = shield_background_style();
+    for (NSMenuItem *item in gShieldBackgroundMenuItems) {
+        item.state = item.tag == style ? NSControlStateValueOn
+                                       : NSControlStateValueOff;
+    }
+}
+
 static BOOL initialize_lid_angle_sensor(void) {
     @autoreleasepool {
         pthread_mutex_lock(&gLidAngleMutex);
@@ -308,6 +349,7 @@ static void update_lid_automation_menu(void) {
 - (void)diagnostics:(id)sender;
 - (void)toggleLidAutomation:(id)sender;
 - (void)selectLidAngle:(id)sender;
+- (void)selectShieldBackground:(id)sender;
 - (void)selectHotKey:(id)sender;
 - (void)quit:(id)sender;
 @end
@@ -352,6 +394,17 @@ static void update_lid_automation_menu(void) {
     update_lid_automation_menu();
     acuMenuAction(ACU_MENU_LID_CONFIGURATION);
 }
+- (void)selectShieldBackground:(id)sender {
+    NSInteger style = [sender tag];
+    if (style != ACUShieldBackgroundSystem &&
+        style != ACUShieldBackgroundBlack) {
+        return;
+    }
+    [[NSUserDefaults standardUserDefaults]
+        setInteger:style
+            forKey:ACUShieldBackgroundPreferenceKey];
+    update_shield_background_menu();
+}
 - (void)selectHotKey:(id)sender {
     ACUHotKeyPreset preset = (ACUHotKeyPreset)[sender tag];
     ACUHotKeyPreset previous = (ACUHotKeyPreset)gCurrentHotKeyPreset;
@@ -389,7 +442,20 @@ int acu_init_menu(void) {
             return 0;
         }
 
-        gStatusItem.button.title = @"ACU";
+        NSString *statusIconPath =
+            [[NSBundle mainBundle] pathForResource:@"StatusIconTemplate"
+                                            ofType:@"pdf"];
+        NSImage *statusIcon =
+            [[NSImage alloc] initWithContentsOfFile:statusIconPath];
+        if (statusIcon != nil) {
+            statusIcon.template = YES;
+            statusIcon.size = NSMakeSize(18.0, 18.0);
+            gStatusItem.button.image = statusIcon;
+            gStatusItem.button.imagePosition = NSImageOnly;
+            gStatusItem.button.toolTip = @"ACU Helper";
+        } else {
+            gStatusItem.button.title = @"ACU";
+        }
         NSMenu *menu = [NSMenu new];
         gStateItem = [[NSMenuItem alloc] initWithTitle:@"状态：未启用"
                                                 action:nil
@@ -411,6 +477,31 @@ int acu_init_menu(void) {
                                keyEquivalent:@""];
         gKeepAwakeMenuItem.target = gMenuTarget;
         [menu addItem:gKeepAwakeMenuItem];
+
+        NSMenuItem *shieldBackgroundRootItem =
+            [[NSMenuItem alloc] initWithTitle:@"模拟锁屏背景"
+                                      action:nil
+                               keyEquivalent:@""];
+        NSMenu *shieldBackgroundMenu =
+            [[NSMenu alloc] initWithTitle:@"模拟锁屏背景"];
+        NSArray<NSString *> *backgroundTitles =
+            @[@"当前系统背景（不支持生成式墙纸）", @"纯黑"];
+        NSMutableArray<NSMenuItem *> *backgroundItems =
+            [NSMutableArray new];
+        for (NSInteger index = 0; index < backgroundTitles.count; index++) {
+            NSMenuItem *item =
+                [[NSMenuItem alloc]
+                    initWithTitle:backgroundTitles[index]
+                          action:@selector(selectShieldBackground:)
+                   keyEquivalent:@""];
+            item.target = gMenuTarget;
+            item.tag = index;
+            [shieldBackgroundMenu addItem:item];
+            [backgroundItems addObject:item];
+        }
+        gShieldBackgroundMenuItems = backgroundItems;
+        shieldBackgroundRootItem.submenu = shieldBackgroundMenu;
+        [menu addItem:shieldBackgroundRootItem];
 
         gLidAutomationMenuItem =
             [[NSMenuItem alloc] initWithTitle:@"半合盖自动保护"
@@ -510,6 +601,7 @@ int acu_init_menu(void) {
                            available);
         initialize_lid_angle_sensor();
         update_lid_automation_menu();
+        update_shield_background_menu();
         // 进程重启后立即恢复防锁屏的勾选状态（不必等子进程上报 awake）。
         if (acu_keep_awake_persisted()) {
             gKeepAwakeMenuItem.title = @"停止阻止系统锁屏";
@@ -1174,6 +1266,696 @@ void acu_set_input_authentication_mode(int enabled) {
     atomic_store(&gAuthenticationPID, 0);
 }
 
+static NSDictionary *selected_desktop_wallpaper_choice(NSScreen *screen) {
+    NSString *path =
+        [NSHomeDirectory()
+            stringByAppendingPathComponent:
+                @"Library/Application Support/com.apple.wallpaper/"
+                 "Store/Index.plist"];
+    NSDictionary *store =
+        [NSDictionary dictionaryWithContentsOfFile:path];
+    NSNumber *displayNumber =
+        screen.deviceDescription[@"NSScreenNumber"];
+    CGDirectDisplayID displayID =
+        (CGDirectDisplayID)displayNumber.unsignedIntValue;
+    CFUUIDRef displayUUID = CGDisplayCreateUUIDFromDisplayID(displayID);
+    NSString *displayKey = nil;
+    if (displayUUID != NULL) {
+        displayKey =
+            CFBridgingRelease(
+                CFUUIDCreateString(kCFAllocatorDefault, displayUUID));
+        CFRelease(displayUUID);
+    }
+
+    NSDictionary *displayRecord =
+        displayKey == nil ? nil : store[@"Displays"][displayKey];
+    NSArray *choices =
+        displayRecord[@"Desktop"][@"Content"][@"Choices"];
+    if (![choices isKindOfClass:[NSArray class]] || choices.count == 0) {
+        choices =
+            store[@"Spaces"][@""]
+                 [@"Default"][@"Desktop"][@"Content"][@"Choices"];
+    }
+    NSDictionary *choice =
+        [choices isKindOfClass:[NSArray class]] ? choices.firstObject : nil;
+    return [choice isKindOfClass:[NSDictionary class]] ? choice : nil;
+}
+
+static NSURL *wallpaper_extension_url(NSString *provider) {
+    if (provider.length == 0) {
+        return nil;
+    }
+    NSString *extensionProvider = provider;
+    NSString *choicePrefix = @"com.apple.wallpaper.choice.";
+    if ([provider hasPrefix:choicePrefix]) {
+        extensionProvider =
+            [@"com.apple.wallpaper.extension."
+                stringByAppendingString:
+                    [provider substringFromIndex:choicePrefix.length]];
+    }
+    NSURL *directory =
+        [NSURL fileURLWithPath:@"/System/Library/ExtensionKit/Extensions"
+                  isDirectory:YES];
+    NSArray<NSURL *> *extensions =
+        [[NSFileManager defaultManager]
+            contentsOfDirectoryAtURL:directory
+          includingPropertiesForKeys:nil
+                             options:NSDirectoryEnumerationSkipsHiddenFiles
+                               error:nil];
+    for (NSURL *extension in extensions) {
+        NSBundle *bundle = [NSBundle bundleWithURL:extension];
+        if ([bundle.bundleIdentifier isEqualToString:provider] ||
+            [bundle.bundleIdentifier isEqualToString:extensionProvider]) {
+            return extension;
+        }
+    }
+    return nil;
+}
+
+static BOOL image_can_fill_screen(NSURL *url, NSScreen *screen) {
+    NSImage *image =
+        url == nil ? nil : [[NSImage alloc] initWithContentsOfURL:url];
+    if (image == nil || !image.isValid) {
+        return NO;
+    }
+    NSInteger pixelWidth = 0;
+    NSInteger pixelHeight = 0;
+    for (NSImageRep *representation in image.representations) {
+        pixelWidth = MAX(pixelWidth, representation.pixelsWide);
+        pixelHeight = MAX(pixelHeight, representation.pixelsHigh);
+    }
+    CGFloat scale = screen.backingScaleFactor;
+    return pixelWidth >= NSWidth(screen.frame) * scale &&
+           pixelHeight >= NSHeight(screen.frame) * scale;
+}
+
+static NSURL *wallpaper_extension_preview_url(NSURL *extension,
+                                              BOOL dark,
+                                              NSScreen *screen) {
+    if (extension == nil) {
+        return nil;
+    }
+    NSURL *resources =
+        [extension URLByAppendingPathComponent:@"Contents/Resources"
+                                    isDirectory:YES];
+    NSArray<NSString *> *names =
+        dark
+            ? @[@"thumbnail dark.heic", @"thumbnail.heic",
+                @"thumbnail light.heic"]
+            : @[@"thumbnail light.heic", @"thumbnail.heic",
+                @"thumbnail dark.heic"];
+    for (NSString *name in names) {
+        NSURL *candidate =
+            [resources URLByAppendingPathComponent:name isDirectory:NO];
+        if (image_can_fill_screen(candidate, screen)) {
+            return candidate;
+        }
+    }
+    return nil;
+}
+
+static NSURL *wallpaper_file_url(id value) {
+    if ([value isKindOfClass:[NSURL class]]) {
+        NSURL *url = value;
+        return url.isFileURL ? url : nil;
+    }
+    if ([value isKindOfClass:[NSString class]]) {
+        NSString *path = value;
+        if ([[NSFileManager defaultManager] isReadableFileAtPath:path]) {
+            return [NSURL fileURLWithPath:path];
+        }
+        return nil;
+    }
+    if ([value isKindOfClass:[NSData class]]) {
+        BOOL stale = NO;
+        NSURL *url =
+            [NSURL URLByResolvingBookmarkData:value
+                                       options:NSURLBookmarkResolutionWithoutUI |
+                                               NSURLBookmarkResolutionWithoutMounting
+                                 relativeToURL:nil
+                           bookmarkDataIsStale:&stale
+                                         error:nil];
+        return url.isFileURL ? url : nil;
+    }
+    if ([value isKindOfClass:[NSArray class]]) {
+        for (id child in (NSArray *)value) {
+            NSURL *url = wallpaper_file_url(child);
+            if (url != nil) {
+                return url;
+            }
+        }
+    } else if ([value isKindOfClass:[NSDictionary class]]) {
+        for (id child in [(NSDictionary *)value allValues]) {
+            NSURL *url = wallpaper_file_url(child);
+            if (url != nil) {
+                return url;
+            }
+        }
+    }
+    return nil;
+}
+
+static NSDictionary *wallpaper_entry_with_id(id value,
+                                              NSString *identifier) {
+    if ([value isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *dictionary = value;
+        if ([dictionary[@"id"] isEqualToString:identifier]) {
+            return dictionary;
+        }
+        for (id child in dictionary.allValues) {
+            NSDictionary *match =
+                wallpaper_entry_with_id(child, identifier);
+            if (match != nil) {
+                return match;
+            }
+        }
+    } else if ([value isKindOfClass:[NSArray class]]) {
+        for (id child in (NSArray *)value) {
+            NSDictionary *match =
+                wallpaper_entry_with_id(child, identifier);
+            if (match != nil) {
+                return match;
+            }
+        }
+    }
+    return nil;
+}
+
+static NSDictionary *decode_wallpaper_configuration(NSData *data) {
+    if (![data isKindOfClass:[NSData class]] || data.length == 0) {
+        return nil;
+    }
+    id value =
+        [NSPropertyListSerialization propertyListWithData:data
+                                                   options:0
+                                                    format:nil
+                                                     error:nil];
+    return [value isKindOfClass:[NSDictionary class]] ? value : nil;
+}
+
+static NSURL *aerial_remote_video_url(NSDictionary *choice,
+                                      NSScreen *screen,
+                                      NSURL **posterURL,
+                                      NSURL **localVideoURL) {
+    NSDictionary *configuration =
+        decode_wallpaper_configuration(choice[@"Configuration"]);
+    NSString *selectedID = configuration[@"assetID"];
+    if (![selectedID isKindOfClass:[NSString class]]) {
+        return nil;
+    }
+
+    NSString *aerialsRoot =
+        [NSHomeDirectory()
+            stringByAppendingPathComponent:
+                @"Library/Application Support/com.apple.wallpaper/aerials"];
+    NSString *manifestPath =
+        [aerialsRoot stringByAppendingPathComponent:
+                         @"manifest/entries.json"];
+    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    if (manifestData == nil) {
+        manifestPath =
+            @"/System/Library/ExtensionKit/Extensions/"
+             "WallpaperAerialsExtension.appex/Contents/Resources/"
+             "entries.json";
+        manifestData = [NSData dataWithContentsOfFile:manifestPath];
+    }
+    NSDictionary *manifest =
+        manifestData == nil
+            ? nil
+            : [NSJSONSerialization JSONObjectWithData:manifestData
+                                              options:0
+                                                error:nil];
+    NSArray<NSDictionary *> *assets = manifest[@"assets"];
+    if (![assets isKindOfClass:[NSArray class]]) {
+        return nil;
+    }
+
+    NSString *appearance =
+        [[NSApp effectiveAppearance]
+            bestMatchFromAppearancesWithNames:
+                @[NSAppearanceNameDarkAqua, NSAppearanceNameAqua]];
+    NSString *wantedAppearance =
+        [appearance isEqualToString:NSAppearanceNameDarkAqua]
+            ? @"dark"
+            : @"light";
+    NSString *wantedOrientation =
+        NSHeight(screen.frame) > NSWidth(screen.frame)
+            ? @"portrait"
+            : @"landscape";
+
+    NSDictionary *selectedAsset = nil;
+    for (NSDictionary *asset in assets) {
+        if ([asset[@"id"] isEqualToString:selectedID]) {
+            selectedAsset = asset;
+            break;
+        }
+    }
+    if (selectedAsset == nil) {
+        for (NSDictionary *asset in assets) {
+            NSArray *subcategories = asset[@"subcategories"];
+            NSDictionary *variant = asset[@"variant"];
+            if ([subcategories containsObject:selectedID] &&
+                [variant[@"appearance"] isEqualToString:wantedAppearance] &&
+                [variant[@"orientation"] isEqualToString:wantedOrientation]) {
+                selectedAsset = asset;
+                break;
+            }
+        }
+    }
+    if (selectedAsset == nil) {
+        NSDictionary *group =
+            wallpaper_entry_with_id(manifest[@"categories"], selectedID);
+        NSString *representativeID = group[@"representativeAssetID"];
+        for (NSDictionary *asset in assets) {
+            if ([asset[@"id"] isEqualToString:representativeID]) {
+                selectedAsset = asset;
+                break;
+            }
+        }
+    }
+    NSString *assetID = selectedAsset[@"id"];
+    if (![assetID isKindOfClass:[NSString class]]) {
+        return nil;
+    }
+
+    if (localVideoURL != NULL) {
+        NSString *localPath =
+            [[aerialsRoot stringByAppendingPathComponent:@"videos"]
+                stringByAppendingPathComponent:
+                    [assetID stringByAppendingPathExtension:@"mov"]];
+        if ([[NSFileManager defaultManager]
+                isReadableFileAtPath:localPath]) {
+            *localVideoURL = [NSURL fileURLWithPath:localPath];
+        }
+    }
+    if (posterURL != NULL) {
+        NSString *posterPath =
+            [[aerialsRoot stringByAppendingPathComponent:@"thumbnails"]
+                stringByAppendingPathComponent:
+                    [assetID stringByAppendingPathExtension:@"png"]];
+        if ([[NSFileManager defaultManager]
+                isReadableFileAtPath:posterPath]) {
+            *posterURL = [NSURL fileURLWithPath:posterPath];
+        }
+    }
+
+    NSString *videoString = selectedAsset[@"url-4K-SDR-240FPS"];
+    if (![videoString isKindOfClass:[NSString class]]) {
+        for (NSString *key in selectedAsset) {
+            id value = selectedAsset[key];
+            if ([key hasPrefix:@"url-"] &&
+                [value isKindOfClass:[NSString class]]) {
+                videoString = value;
+                break;
+            }
+        }
+    }
+    return [videoString isKindOfClass:[NSString class]]
+               ? [NSURL URLWithString:videoString]
+               : nil;
+}
+
+static NSURL *extension_remote_video_url(NSString *provider,
+                                         NSScreen *screen,
+                                         NSURL **posterURL) {
+    NSURL *extension = wallpaper_extension_url(provider);
+    NSString *appearance =
+        [[NSApp effectiveAppearance]
+            bestMatchFromAppearancesWithNames:
+                @[NSAppearanceNameDarkAqua, NSAppearanceNameAqua]];
+    BOOL dark = [appearance isEqualToString:NSAppearanceNameDarkAqua];
+    if (posterURL != NULL) {
+        *posterURL =
+            wallpaper_extension_preview_url(extension, dark, screen);
+    }
+    NSURL *manifestURL =
+        [extension URLByAppendingPathComponent:
+                       @"Contents/Resources/manifest.json"];
+    NSData *manifestData =
+        manifestURL == nil ? nil : [NSData dataWithContentsOfURL:manifestURL];
+    NSDictionary *manifest =
+        manifestData == nil
+            ? nil
+            : [NSJSONSerialization JSONObjectWithData:manifestData
+                                              options:0
+                                                error:nil];
+    if (![manifest isKindOfClass:[NSDictionary class]]) {
+        fprintf(stderr,
+                "acu-helper: dynamic lock background provider %s has no "
+                "supported manifest\n",
+                provider.UTF8String ?: "(unknown)");
+        return nil;
+    }
+
+    BOOL portrait = NSHeight(screen.frame) > NSWidth(screen.frame);
+    NSString *videoKey =
+        dark
+            ? (portrait ? @"darkPortraitRemoteURL"
+                        : @"darkLandscapeRemoteURL")
+            : (portrait ? @"lightPortraitRemoteURL"
+                        : @"lightLandscapeRemoteURL");
+    NSString *videoString = manifest[videoKey];
+    if (![videoString isKindOfClass:[NSString class]]) {
+        return nil;
+    }
+
+    if (posterURL != NULL) {
+        NSString *identifier = manifest[@"identifier"];
+        if ([identifier isKindOfClass:[NSString class]]) {
+            NSString *posterName =
+                [NSString stringWithFormat:@"%@%@.heic",
+                                           identifier,
+                                           dark ? @"Dark" : @"Light"];
+            NSURL *candidate =
+                [extension URLByAppendingPathComponent:
+                               [@"Contents/Resources"
+                                   stringByAppendingPathComponent:posterName]];
+            if ([[NSFileManager defaultManager]
+                    isReadableFileAtPath:candidate.path]) {
+                *posterURL = candidate;
+            }
+        }
+    }
+    return [NSURL URLWithString:videoString];
+}
+
+static NSURL *selected_desktop_remote_video_url(NSScreen *screen,
+                                                NSURL **posterURL,
+                                                NSURL **localVideoURL) {
+    NSDictionary *choice =
+        selected_desktop_wallpaper_choice(screen);
+    NSString *provider = choice[@"Provider"];
+    if ([provider isEqualToString:@"com.apple.wallpaper.choice.aerials"]) {
+        return aerial_remote_video_url(
+            choice, screen, posterURL, localVideoURL);
+    }
+    NSURL *remoteURL =
+        extension_remote_video_url(provider, screen, posterURL);
+    if (posterURL != NULL && *posterURL == nil) {
+        *posterURL = wallpaper_file_url(choice[@"Files"]);
+        if (*posterURL == nil &&
+            ([provider containsString:@".image"] ||
+             [provider containsString:@".legacy"])) {
+            *posterURL =
+                [[NSWorkspace sharedWorkspace]
+                    desktopImageURLForScreen:screen];
+        }
+    }
+    return remoteURL;
+}
+
+static NSURL *lock_screen_video_cache_url(NSURL *remoteURL) {
+    NSURL *applicationSupport =
+        [[[NSFileManager defaultManager]
+            URLsForDirectory:NSApplicationSupportDirectory
+                   inDomains:NSUserDomainMask] firstObject];
+    if (applicationSupport == nil || remoteURL.lastPathComponent.length == 0) {
+        return nil;
+    }
+    return [[[applicationSupport
+                URLByAppendingPathComponent:@"ACU Helper"
+                                isDirectory:YES]
+                URLByAppendingPathComponent:@"LockScreenBackgrounds"
+                                isDirectory:YES]
+                URLByAppendingPathComponent:remoteURL.lastPathComponent
+                                isDirectory:NO];
+}
+
+static NSURL *cached_lock_screen_video_url(NSURL *remoteURL) {
+    NSURL *cacheURL = lock_screen_video_cache_url(remoteURL);
+    NSDictionary *attributes =
+        cacheURL == nil
+            ? nil
+            : [[NSFileManager defaultManager]
+                  attributesOfItemAtPath:cacheURL.path
+                                  error:nil];
+    if ([attributes[NSFileSize] unsignedLongLongValue] > 0) {
+        return cacheURL;
+    }
+    return nil;
+}
+
+@interface ACUShieldBackgroundView : NSView
+@property(nonatomic, strong) AVQueuePlayer *player;
+@property(nonatomic, strong) AVPlayerLooper *looper;
+@property(nonatomic, strong) AVPlayerLayer *playerLayer;
+@property(nonatomic, strong) CALayer *dimmingLayer;
+@property(nonatomic, strong) NSURL *remoteVideoURL;
+- (instancetype)initWithFrame:(NSRect)frame
+                     videoURL:(NSURL *)videoURL
+                    posterURL:(NSURL *)posterURL
+               remoteVideoURL:(NSURL *)remoteVideoURL;
+- (void)startVideoAtURL:(NSURL *)videoURL;
+- (void)setPlaybackEnabled:(BOOL)enabled;
+- (void)stopPlayback;
+@end
+
+@implementation ACUShieldBackgroundView
+- (instancetype)initWithFrame:(NSRect)frame
+                     videoURL:(NSURL *)videoURL
+                    posterURL:(NSURL *)posterURL
+               remoteVideoURL:(NSURL *)remoteVideoURL {
+    self = [super initWithFrame:frame];
+    if (self == nil) {
+        return nil;
+    }
+    self.remoteVideoURL = remoteVideoURL;
+    self.wantsLayer = YES;
+    self.layer.backgroundColor = [NSColor colorWithWhite:0.035 alpha:1.0].CGColor;
+    NSImage *poster =
+        posterURL == nil ? nil : [[NSImage alloc] initWithContentsOfURL:posterURL];
+    if (poster != nil && poster.isValid) {
+        self.layer.contents = poster;
+        self.layer.contentsGravity = kCAGravityResizeAspectFill;
+    }
+    self.dimmingLayer = [CALayer layer];
+    self.dimmingLayer.backgroundColor =
+        [NSColor colorWithWhite:0.0 alpha:0.30].CGColor;
+    self.dimmingLayer.frame = self.bounds;
+    [self.layer addSublayer:self.dimmingLayer];
+    if (videoURL != nil) {
+        [self startVideoAtURL:videoURL];
+    }
+    return self;
+}
+
+- (void)startVideoAtURL:(NSURL *)videoURL {
+    if (videoURL == nil || self.player != nil) {
+        return;
+    }
+    AVPlayerItem *item = [AVPlayerItem playerItemWithURL:videoURL];
+    self.player = [AVQueuePlayer queuePlayerWithItems:@[]];
+    self.player.muted = YES;
+    self.looper =
+        [AVPlayerLooper playerLooperWithPlayer:self.player
+                                  templateItem:item];
+    self.playerLayer =
+        [AVPlayerLayer playerLayerWithPlayer:self.player];
+    self.playerLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
+    self.playerLayer.frame = self.bounds;
+    [self.layer insertSublayer:self.playerLayer below:self.dimmingLayer];
+    if (gShieldAnimationEnabled) {
+        [self.player play];
+    }
+}
+
+- (void)layout {
+    [super layout];
+    self.playerLayer.frame = self.bounds;
+    self.dimmingLayer.frame = self.bounds;
+}
+
+- (void)setPlaybackEnabled:(BOOL)enabled {
+    if (enabled) {
+        [self.player play];
+    } else {
+        [self.player pause];
+    }
+}
+
+- (void)stopPlayback {
+    [self.player pause];
+    [self.player removeAllItems];
+    self.looper = nil;
+    self.player = nil;
+    [self.playerLayer removeFromSuperlayer];
+    self.playerLayer = nil;
+}
+@end
+
+static void apply_downloaded_lock_screen_video(NSURL *remoteURL,
+                                               NSURL *localURL) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      for (NSPanel *window in gShieldWindows) {
+          if (![window.contentView
+                  isKindOfClass:[ACUShieldBackgroundView class]]) {
+              continue;
+          }
+          ACUShieldBackgroundView *view =
+              (ACUShieldBackgroundView *)window.contentView;
+          if ([view.remoteVideoURL isEqual:remoteURL]) {
+              [view startVideoAtURL:localURL];
+          }
+      }
+    });
+}
+
+static void download_lock_screen_video(NSURL *remoteURL) {
+    if (remoteURL == nil ||
+        ![remoteURL.scheme.lowercaseString isEqualToString:@"https"] ||
+        ![remoteURL.host.lowercaseString hasSuffix:@".apple.com"]) {
+        return;
+    }
+    NSURL *cacheURL = lock_screen_video_cache_url(remoteURL);
+    if (cacheURL == nil || cached_lock_screen_video_url(remoteURL) != nil) {
+        return;
+    }
+
+    @synchronized([ACUShieldBackgroundView class]) {
+        if (gShieldVideoDownloads == nil) {
+            gShieldVideoDownloads = [NSMutableDictionary new];
+        }
+        if (gShieldVideoDownloads[remoteURL.absoluteString] != nil) {
+            return;
+        }
+
+        NSURLSessionDownloadTask *task =
+            [[NSURLSession sharedSession]
+                downloadTaskWithURL:remoteURL
+                  completionHandler:^(NSURL *location,
+                                      NSURLResponse *response,
+                                      NSError *downloadError) {
+          NSError *fileError = downloadError;
+          NSHTTPURLResponse *httpResponse =
+              [response isKindOfClass:[NSHTTPURLResponse class]]
+                  ? (NSHTTPURLResponse *)response
+                  : nil;
+          if (fileError == nil &&
+              (location == nil || httpResponse == nil ||
+               httpResponse.statusCode < 200 ||
+               httpResponse.statusCode >= 300)) {
+              fileError =
+                  [NSError errorWithDomain:@"ACUShieldBackground"
+                                      code:httpResponse == nil
+                                               ? -1
+                                               : httpResponse.statusCode
+                                  userInfo:@{
+                                    NSLocalizedDescriptionKey :
+                                        @"invalid video download response",
+                                  }];
+          }
+          if (fileError == nil) {
+              NSFileManager *manager = [NSFileManager defaultManager];
+              NSURL *directory = [cacheURL URLByDeletingLastPathComponent];
+              [manager createDirectoryAtURL:directory
+                withIntermediateDirectories:YES
+                                 attributes:nil
+                                      error:&fileError];
+              if (fileError == nil &&
+                  ![manager isReadableFileAtPath:cacheURL.path]) {
+                  [manager moveItemAtURL:location
+                                  toURL:cacheURL
+                                  error:&fileError];
+              }
+          }
+          if (fileError == nil &&
+              [[NSFileManager defaultManager]
+                  isReadableFileAtPath:cacheURL.path]) {
+              apply_downloaded_lock_screen_video(remoteURL, cacheURL);
+          } else {
+              const char *message =
+                  fileError.localizedDescription.UTF8String;
+              fprintf(stderr,
+                      "acu-helper: download lock screen video failed: %s\n",
+                      message != NULL ? message : "unknown error");
+          }
+          @synchronized([ACUShieldBackgroundView class]) {
+              [gShieldVideoDownloads
+                  removeObjectForKey:remoteURL.absoluteString];
+          }
+        }];
+        gShieldVideoDownloads[remoteURL.absoluteString] = task;
+        [task resume];
+    }
+}
+
+static void set_shield_background_animation_enabled(BOOL enabled) {
+    on_main_sync(^{
+      gShieldAnimationEnabled = enabled;
+      for (NSPanel *window in gShieldWindows) {
+          if ([window.contentView
+                  isKindOfClass:[ACUShieldBackgroundView class]]) {
+              [(ACUShieldBackgroundView *)window.contentView
+                  setPlaybackEnabled:enabled];
+          }
+      }
+    });
+}
+
+static void close_shield_window(NSPanel *window) {
+    if ([window.contentView
+            isKindOfClass:[ACUShieldBackgroundView class]]) {
+        [(ACUShieldBackgroundView *)window.contentView stopPlayback];
+    }
+    [window close];
+}
+
+static NSLayoutConstraint *shield_vertical_constraint(NSPanel *panel) {
+    for (NSLayoutConstraint *constraint in panel.contentView.constraints) {
+        if ([constraint.identifier
+                isEqualToString:ACUShieldVerticalConstraintIdentifier]) {
+            return constraint;
+        }
+    }
+    return nil;
+}
+
+static void move_shield_text(void) {
+    gShieldMotionOffset =
+        gShieldMotionMovesUp ? ACUShieldMotionDistance
+                             : -ACUShieldMotionDistance;
+    gShieldMotionMovesUp = !gShieldMotionMovesUp;
+
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
+      context.duration = 0.8;
+      context.allowsImplicitAnimation = YES;
+      for (NSPanel *window in gShieldWindows) {
+          NSLayoutConstraint *constraint =
+              shield_vertical_constraint(window);
+          if (constraint == nil) {
+              continue;
+          }
+          constraint.constant =
+              ACUShieldTitleBaseOffset + gShieldMotionOffset;
+          [[window.contentView animator] layoutSubtreeIfNeeded];
+      }
+    } completionHandler:nil];
+}
+
+static void start_shield_motion_timer(void) {
+    if (gShieldMotionTimer != nil) {
+        return;
+    }
+    gShieldMotionOffset = 0;
+    gShieldMotionMovesUp = YES;
+    gShieldMotionTimer =
+        [NSTimer timerWithTimeInterval:ACUShieldMotionInterval
+                               repeats:YES
+                                 block:^(NSTimer *timer) {
+                                   (void)timer;
+                                   move_shield_text();
+                                 }];
+    [[NSRunLoop mainRunLoop] addTimer:gShieldMotionTimer
+                              forMode:NSRunLoopCommonModes];
+}
+
+static void stop_shield_motion_timer(void) {
+    [gShieldMotionTimer invalidate];
+    gShieldMotionTimer = nil;
+    gShieldMotionOffset = 0;
+    gShieldMotionMovesUp = YES;
+}
+
 static NSPanel *create_shield(NSScreen *screen) {
     NSPanel *panel =
         [[NSPanel alloc] initWithContentRect:NSZeroRect
@@ -1194,7 +1976,38 @@ static NSPanel *create_shield(NSScreen *screen) {
                                NSWindowCollectionBehaviorFullScreenAuxiliary |
                                NSWindowCollectionBehaviorStationary;
 
-    NSView *content = panel.contentView;
+    NSURL *remoteVideoURL = nil;
+    NSURL *videoURL = nil;
+    NSURL *posterURL = nil;
+    NSURL *systemVideoURL = nil;
+    if (shield_background_style() ==
+        ACUShieldBackgroundSystem) {
+        remoteVideoURL =
+            selected_desktop_remote_video_url(
+                screen, &posterURL, &systemVideoURL);
+        videoURL = systemVideoURL != nil
+                       ? systemVideoURL
+                       : cached_lock_screen_video_url(remoteVideoURL);
+        if (videoURL == nil && remoteVideoURL == nil && posterURL == nil) {
+            fprintf(stderr,
+                    "acu-helper: selected system background unavailable; "
+                    "using black background\n");
+        }
+    }
+    ACUShieldBackgroundView *content =
+        [[ACUShieldBackgroundView alloc]
+            initWithFrame:NSMakeRect(0, 0,
+                                     NSWidth(screen.frame),
+                                     NSHeight(screen.frame))
+                 videoURL:videoURL
+                posterURL:posterURL
+           remoteVideoURL:remoteVideoURL];
+    content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    panel.contentView = content;
+    if (remoteVideoURL != nil && videoURL == nil) {
+        download_lock_screen_video(remoteVideoURL);
+    }
+
     NSTextField *title = [NSTextField labelWithString:@"ACU Helper"];
     title.textColor = [NSColor whiteColor];
     title.font = [NSFont systemFontOfSize:32 weight:NSFontWeightSemibold];
@@ -1217,10 +2030,16 @@ static NSPanel *create_shield(NSScreen *screen) {
 
     [content addSubview:title];
     [content addSubview:status];
+    NSLayoutConstraint *verticalConstraint =
+        [title.centerYAnchor
+            constraintEqualToAnchor:content.centerYAnchor
+                           constant:ACUShieldTitleBaseOffset +
+                                    gShieldMotionOffset];
+    verticalConstraint.identifier =
+        ACUShieldVerticalConstraintIdentifier;
     [NSLayoutConstraint activateConstraints:@[
       [title.centerXAnchor constraintEqualToAnchor:content.centerXAnchor],
-      [title.centerYAnchor constraintEqualToAnchor:content.centerYAnchor
-                                          constant:-24],
+      verticalConstraint,
       [status.centerXAnchor constraintEqualToAnchor:content.centerXAnchor],
       [status.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:18]
     ]];
@@ -1237,7 +2056,7 @@ static int rebuild_shields(void) {
         NSPanel *panel = create_shield(screen);
         if (panel == nil) {
             for (NSPanel *window in newWindows) {
-                [window close];
+                close_shield_window(window);
             }
             return 0;
         }
@@ -1248,7 +2067,7 @@ static int rebuild_shields(void) {
         [window orderFrontRegardless];
     }
     for (NSPanel *window in gShieldWindows) {
-        [window close];
+        close_shield_window(window);
     }
     gShieldWindows = newWindows;
     return 1;
@@ -1260,6 +2079,9 @@ int acu_show_shields(void) {
       [NSApplication sharedApplication];
       [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
       result = rebuild_shields();
+      if (result) {
+          start_shield_motion_timer();
+      }
       if (result && gScreenObserver == nil) {
           gScreenObserver = [[NSNotificationCenter defaultCenter]
               addObserverForName:NSApplicationDidChangeScreenParametersNotification
@@ -1276,12 +2098,13 @@ int acu_show_shields(void) {
 
 void acu_hide_shields(void) {
     on_main_sync(^{
+      stop_shield_motion_timer();
       if (gScreenObserver != nil) {
           [[NSNotificationCenter defaultCenter] removeObserver:gScreenObserver];
           gScreenObserver = nil;
       }
       for (NSPanel *window in gShieldWindows) {
-          [window close];
+          close_shield_window(window);
       }
       gShieldWindows = nil;
     });
@@ -1589,6 +2412,9 @@ int acu_save_power_settings(void) {
     }
     gBrightnessSaved = saved;
     pthread_mutex_unlock(&gBrightnessMutex);
+    if (saved) {
+        set_shield_background_animation_enabled(NO);
+    }
     return saved ? 1 : 0;
 }
 
@@ -1637,6 +2463,9 @@ int acu_restore_power_settings(void) {
         clear_display_brightness();
     }
     pthread_mutex_unlock(&gBrightnessMutex);
+    if (restored) {
+        set_shield_background_animation_enabled(YES);
+    }
     return restored ? 1 : 0;
 }
 

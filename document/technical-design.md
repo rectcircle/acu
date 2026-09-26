@@ -339,13 +339,21 @@ styleMask          = borderless + nonactivatingPanel
 level              = CGShieldingWindowLevel()
 collectionBehavior = canJoinAllSpaces + fullScreenAuxiliary
 opaque             = true
-background         = solid dark color
+background         = selected system wallpaper or solid dark color
 hidesOnDeactivate  = false
 sharingType        = none
 ```
 
 正常保护态：
 
+- 背景模式通过 `NSUserDefaults` 持久化。默认按显示器 UUID 读取 Wallpaper Store 当前
+  `Desktop` choice，再按内容能力选择视频、原始图片或扩展预览图。
+- Aerials 优先复用系统 `aerials/videos` 中已下载的资源；普通图片读取 choice 文件；
+  不支持 Metal/SceneKit 生成式墙纸，此类墙纸回退纯黑。
+- 视频未缓存时立即显示扩展内置 HEIC 首帧，并用 `NSURLSessionDownloadTask` 下载到
+  `Application Support/ACU Helper/LockScreenBackgrounds`；完成后切换全部匹配屏幕。
+- 视频使用 `AVQueuePlayer + AVPlayerLooper` 播放；亮度降至 `0` 后暂停，恢复亮度时继续。
+- 产品名和状态文字每 60 秒在垂直方向移动 `12pt`，退出保护时销毁定时器。
 - Window 不成为 key/main window。
 - `ignoresMouseEvents = true`，让可信自动化客户端的合成事件命中底层目标应用。
 - 物理鼠标由 Event Tap 消费。
