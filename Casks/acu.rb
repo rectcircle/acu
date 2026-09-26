@@ -2,10 +2,10 @@ cask "acu" do
   version :latest
   sha256 :no_check
 
-  url "https://github.com/rectcircle/acu-helper/releases/latest/download/ACU.tar.gz"
+  url "https://github.com/rectcircle/acu/releases/latest/download/ACU.tar.gz"
   name "ACU"
   desc "Keep automation sessions active and protected"
-  homepage "https://github.com/rectcircle/acu-helper"
+  homepage "https://github.com/rectcircle/acu"
 
   depends_on macos: :sequoia
 

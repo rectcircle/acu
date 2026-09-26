@@ -23,7 +23,7 @@ language configured in macOS. Restart ACU after changing the language.
 ## Homebrew Installation
 
 ```sh
-brew tap rectcircle/acu https://github.com/rectcircle/acu-helper
+brew tap rectcircle/acu https://github.com/rectcircle/acu
 brew install --cask rectcircle/acu/acu
 ```
 

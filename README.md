@@ -19,7 +19,7 @@ ACU（Automation / Agent Continuity Utility）是一个 macOS 菜单栏工具，
 ## Homebrew 安装
 
 ```sh
-brew tap rectcircle/acu https://github.com/rectcircle/acu-helper
+brew tap rectcircle/acu https://github.com/rectcircle/acu
 brew install --cask rectcircle/acu/acu
 ```
 
