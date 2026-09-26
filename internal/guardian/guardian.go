@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rectcircle/acu-helper/internal/config"
-	"github.com/rectcircle/acu-helper/internal/ipc"
-	"github.com/rectcircle/acu-helper/internal/macos"
+	"github.com/rectcircle/acu/internal/config"
+	"github.com/rectcircle/acu/internal/ipc"
+	"github.com/rectcircle/acu/internal/macos"
 )
 
 const (

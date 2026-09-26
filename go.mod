@@ -1,3 +1,3 @@
-module github.com/rectcircle/acu-helper
+module github.com/rectcircle/acu
 
 go 1.22

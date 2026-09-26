@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rectcircle/acu-helper/internal/macos"
+	"github.com/rectcircle/acu/internal/macos"
 )
 
 func TestPreflightSummaryPrioritizesAccessibility(t *testing.T) {

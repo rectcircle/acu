@@ -1,4 +1,4 @@
-# ACU Helper 技术方案
+# ACU 技术方案
 
 ## 1. 方案概述
 
@@ -61,8 +61,8 @@ Go 负责：
 同一个可执行文件支持两种模式：
 
 ```text
-acu-helper                 # menu controller
-acu-helper guardian        # protection guardian
+acu                 # menu controller
+acu guardian        # protection guardian
 ```
 
 采用双进程而不是单进程的原因：
@@ -218,7 +218,7 @@ Automatic Mouse Mover 的主要策略是：
 3. 没有活动且系统未睡眠时，将鼠标移动约 10 像素。
 4. 下次向反方向移动，避免指针持续漂移。
 
-ACU Helper 保留“只在空闲时移动”的原则，但使用更小位移，并立即恢复原位置。
+ACU 保留“只在空闲时移动”的原则，但使用更小位移，并立即恢复原位置。
 
 参考源码：
 
@@ -271,7 +271,7 @@ verify event post succeeded
 - `CGEventPost`
 - `CGEventGetLocation`
 
-Helper 自己产生的事件写入固定随机 `kCGEventSourceUserData` 标记，使 Event Tap 能识别并
+ACU 自己产生的事件写入固定随机 `kCGEventSourceUserData` 标记，使 Event Tap 能识别并
 放行，且不将其误判为用户解除请求。
 
 MVP 不使用 `caffeinate` 或永久 IOPM Assertion：
@@ -351,7 +351,7 @@ sharingType        = none
 - Aerials 优先复用系统 `aerials/videos` 中已下载的资源；普通图片读取 choice 文件；
   不支持 Metal/SceneKit 生成式墙纸，此类墙纸回退纯黑。
 - 视频未缓存时立即显示扩展内置 HEIC 首帧，并用 `NSURLSessionDownloadTask` 下载到
-  `Application Support/ACU Helper/LockScreenBackgrounds`；完成后切换全部匹配屏幕。
+  `Application Support/ACU/LockScreenBackgrounds`；完成后切换全部匹配屏幕。
 - 视频使用 `AVQueuePlayer + AVPlayerLooper` 播放；亮度降至 `0` 后暂停，恢复亮度时继续。
 - 产品名和状态文字每 60 秒在垂直方向移动 `12pt`，退出保护时销毁定时器。
 - Window 不成为 key/main window。
@@ -378,7 +378,7 @@ sharingType        = none
 - Shield Window 不附着到目标应用。
 - 不改变目标窗口层级、位置或焦点。
 
-具体采集和交互链路由目标客户端负责，ACU Helper 不依赖或记录其内部实现。兼容性必须
+具体采集和交互链路由目标客户端负责，ACU 不依赖或记录其内部实现。兼容性必须
 通过目标客户端的公开用户操作进行黑盒验证。
 
 ## 8. 输入过滤
@@ -413,7 +413,7 @@ Event Tap 回调只做常量时间判断，不调用 Go 网络、文件或阻塞
 事件分为：
 
 ```text
-HelperSynthetic
+ACUSynthetic
 SoftwareSynthetic
 Physical
 ```
@@ -428,7 +428,7 @@ Physical
 
 | 来源 | 普通保护态 | 认证态 |
 |---|---|---|
-| HelperSynthetic | 放行 | 放行 |
+| ACUSynthetic | 放行 | 放行 |
 | SoftwareSynthetic | 放行 | 放行 |
 | Physical Enter keyDown | 消费并发起认证 | 消费重复请求 |
 | 其他 Physical | 消费 | 定向投递给 LocalAuthentication UI |
@@ -460,7 +460,7 @@ Objective-C bridge 使用：
 ```objective-c
 LAContext *context = [LAContext new];
 [context evaluatePolicy:LAPolicyDeviceOwnerAuthentication
-         localizedReason:@"解除 ACU Helper 模拟锁屏"
+         localizedReason:@"解除 ACU 模拟锁屏"
                    reply:...];
 ```
 
@@ -643,9 +643,9 @@ session_already_locked
 ## 13. 目录结构
 
 ```text
-acu-helper/
+acu/
   cmd/
-    acu-helper/
+    acu/
       main.go
   internal/
     app/
@@ -773,7 +773,7 @@ cgo 链接：
 
 - 多显示器窗口创建/销毁。
 - Event Tap 来源字段采样。
-- helper 自身 userData 标记。
+- ACU 自身 userData 标记。
 - LocalAuthentication success/cancel/lockout。
 - `CFPreferencesAppValueIsForced` fixture。
 - 锁屏状态识别。

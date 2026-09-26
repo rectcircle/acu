@@ -84,7 +84,7 @@ typedef NS_ENUM(NSInteger, ACUHotKeyPreset) {
     ACUHotKeyPresetDisabled = 3,
 };
 
-static const OSType ACUHotKeySignature = 0x41435548; // ACUH
+static const OSType ACUHotKeySignature = 0x41435531; // ACU1
 static const UInt32 ACUHotKeyIdentifier = 1;
 static const NSInteger ACULidDefaultThreshold = 45;
 static const CGFloat ACUShieldTitleBaseOffset = -24.0;
@@ -446,7 +446,7 @@ int acu_init_menu(void) {
             statusIcon.size = NSMakeSize(18.0, 18.0);
             gStatusItem.button.image = statusIcon;
             gStatusItem.button.imagePosition = NSImageOnly;
-            gStatusItem.button.toolTip = @"ACU Helper";
+            gStatusItem.button.toolTip = @"ACU";
         } else {
             gStatusItem.button.title = @"ACU";
         }
@@ -674,7 +674,7 @@ static void restart_application(void) {
     task.arguments = @[
       @"-c",
       @"while kill -0 \"$1\" 2>/dev/null; do sleep 0.1; done; exec /usr/bin/open \"$2\"",
-      @"acu-helper-restart",
+      @"acu-restart",
       [NSString stringWithFormat:@"%d", getpid()],
       [NSBundle mainBundle].bundlePath,
     ];
@@ -689,7 +689,7 @@ static void restart_application(void) {
     }
 
     NSAlert *alert = [NSAlert new];
-    alert.messageText = @"无法重新启动 ACU Helper";
+    alert.messageText = @"无法重新启动 ACU";
     alert.informativeText = error.localizedDescription;
     [alert addButtonWithTitle:@"确定"];
     [alert runModal];
@@ -711,7 +711,7 @@ static void monitor_permission_until_granted(uint32_t permission) {
       NSAlert *alert = [NSAlert new];
       alert.messageText = @"权限已启用";
       alert.informativeText =
-          @"需要重新启动 ACU Helper 才能可靠应用新的系统权限。";
+          @"需要重新启动 ACU 才能可靠应用新的系统权限。";
       [alert addButtonWithTitle:@"立即重启"];
       [alert addButtonWithTitle:@"稍后"];
       if ([alert runModal] == NSAlertFirstButtonReturn) {
@@ -741,8 +741,8 @@ void acu_show_preflight_alert(const char *title,
       if (needsAccessibility || needsListenEvents) {
           alert.informativeText = [alertMessage stringByAppendingString:
               @"\n\n操作步骤：\n"
-               "1. 在打开的系统设置页面中启用“ACU Helper”。\n"
-               "2. 检测到授权后，按提示立即重启 ACU Helper。"];
+               "1. 在打开的系统设置页面中启用“ACU”。\n"
+               "2. 检测到授权后，按提示立即重启 ACU。"];
       } else {
           alert.informativeText = alertMessage;
       }
@@ -1486,7 +1486,7 @@ static NSURL *extension_remote_video_url(NSString *provider,
                                                 error:nil];
     if (![manifest isKindOfClass:[NSDictionary class]]) {
         fprintf(stderr,
-                "acu-helper: dynamic lock background provider %s has no "
+                "acu: dynamic lock background provider %s has no "
                 "supported manifest\n",
                 provider.UTF8String ?: "(unknown)");
         return nil;
@@ -1558,7 +1558,7 @@ static NSURL *lock_screen_video_cache_url(NSURL *remoteURL) {
         return nil;
     }
     return [[[applicationSupport
-                URLByAppendingPathComponent:@"ACU Helper"
+                URLByAppendingPathComponent:@"ACU"
                                 isDirectory:YES]
                 URLByAppendingPathComponent:@"LockScreenBackgrounds"
                                 isDirectory:YES]
@@ -1751,7 +1751,7 @@ static void download_lock_screen_video(NSURL *remoteURL) {
               const char *message =
                   fileError.localizedDescription.UTF8String;
               fprintf(stderr,
-                      "acu-helper: download lock screen video failed: %s\n",
+                      "acu: download lock screen video failed: %s\n",
                       message != NULL ? message : "unknown error");
           }
           @synchronized([ACUShieldBackgroundView class]) {
@@ -1875,7 +1875,7 @@ static NSPanel *create_shield(NSScreen *screen) {
                        : cached_lock_screen_video_url(remoteVideoURL);
         if (videoURL == nil && remoteVideoURL == nil && posterURL == nil) {
             fprintf(stderr,
-                    "acu-helper: selected system background unavailable; "
+                    "acu: selected system background unavailable; "
                     "using black background\n");
         }
     }
@@ -1893,7 +1893,7 @@ static NSPanel *create_shield(NSScreen *screen) {
         download_lock_screen_video(remoteVideoURL);
     }
 
-    NSTextField *title = [NSTextField labelWithString:@"ACU Helper"];
+    NSTextField *title = [NSTextField labelWithString:@"ACU"];
     title.textColor = [NSColor whiteColor];
     title.font = [NSFont systemFontOfSize:32 weight:NSFontWeightSemibold];
     title.alignment = NSTextAlignmentCenter;
@@ -2033,7 +2033,7 @@ void acu_show_input_guard_failure(void) {
       NSAlert *alert = [NSAlert new];
       alert.messageText = @"物理输入保护异常";
       alert.informativeText =
-          @"ACU Helper 无法恢复输入拦截，遮罩仍会保留。"
+          @"ACU 无法恢复输入拦截，遮罩仍会保留。"
            "请完成身份认证后退出保护并重新开启应用。";
       [alert addButtonWithTitle:@"开始身份认证"];
       [alert addButtonWithTitle:@"保持遮罩"];
@@ -2112,7 +2112,7 @@ int acu_authenticate(void) {
         dispatch_semaphore_t done = dispatch_semaphore_create(0);
         __block BOOL success = NO;
         [context evaluatePolicy:LAPolicyDeviceOwnerAuthentication
-                localizedReason:@"解除 ACU Helper 模拟锁屏"
+                localizedReason:@"解除 ACU 模拟锁屏"
                           reply:^(BOOL authenticated, NSError *replyError) {
                             (void)replyError;
                             success = authenticated;
@@ -2213,7 +2213,7 @@ int acu_save_power_settings(void) {
         CGGetOnlineDisplayList(ACU_MAX_DISPLAYS, displays, &displayCount);
     if (listResult != kCGErrorSuccess) {
         fprintf(stderr,
-                "acu-helper: list displays for dimming failed: %d\n",
+                "acu: list displays for dimming failed: %d\n",
                 listResult);
         return 0;
     }
@@ -2248,7 +2248,7 @@ int acu_save_power_settings(void) {
                 } else {
                     fprintf(
                         stderr,
-                        "acu-helper: dim display 0x%x failed: %d\n",
+                        "acu: dim display 0x%x failed: %d\n",
                         displays[i],
                         writeResult);
                     (void)gSetLinearBrightness(displays[i], current);
@@ -2271,7 +2271,7 @@ int acu_save_power_settings(void) {
                     } else {
                         fprintf(
                             stderr,
-                            "acu-helper: dim display 0x%x via IODisplay "
+                            "acu: dim display 0x%x via IODisplay "
                             "failed: %d\n",
                             displays[i],
                             writeResult);
@@ -2337,7 +2337,7 @@ int acu_restore_power_settings(void) {
         }
         if (result != kIOReturnSuccess) {
             fprintf(stderr,
-                    "acu-helper: restore display 0x%x brightness failed: %d\n",
+                    "acu: restore display 0x%x brightness failed: %d\n",
                     gDisplayBrightness[i].display,
                     result);
             restored = NO;

@@ -2,7 +2,7 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-APP="$ROOT/build/ACU Helper.app"
+APP="$ROOT/build/ACU.app"
 CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
@@ -16,13 +16,13 @@ cp "$ROOT/resources/icons/StatusIconTemplate.pdf" \
 
 CGO_ENABLED=1 GOOS=darwin go build \
   -trimpath \
-  -o "$MACOS/acu-helper" \
-  "$ROOT/cmd/acu-helper"
+  -o "$MACOS/acu" \
+  "$ROOT/cmd/acu"
 
 IDENTITY=${ACU_CODESIGN_IDENTITY:--}
 if [ "$IDENTITY" = "-" ]; then
   codesign --force --sign - \
-    --requirements '=designated => identifier "github.com.rectcircle.acu-helper"' \
+    --requirements '=designated => identifier "github.com.rectcircle.acu"' \
     "$APP"
 else
   codesign --force --sign "$IDENTITY" "$APP"

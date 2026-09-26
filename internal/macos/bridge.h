@@ -1,5 +1,5 @@
-#ifndef ACU_HELPER_BRIDGE_H
-#define ACU_HELPER_BRIDGE_H
+#ifndef ACU_BRIDGE_H
+#define ACU_BRIDGE_H
 
 #include <stdint.h>
 

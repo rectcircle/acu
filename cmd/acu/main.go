@@ -5,10 +5,10 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/rectcircle/acu-helper/internal/app"
-	"github.com/rectcircle/acu-helper/internal/config"
-	"github.com/rectcircle/acu-helper/internal/guardian"
-	"github.com/rectcircle/acu-helper/internal/ipc"
+	"github.com/rectcircle/acu/internal/app"
+	"github.com/rectcircle/acu/internal/config"
+	"github.com/rectcircle/acu/internal/guardian"
+	"github.com/rectcircle/acu/internal/ipc"
 )
 
 func main() {
@@ -21,7 +21,7 @@ func main() {
 		err = app.Run()
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "acu-helper:", err)
+		fmt.Fprintln(os.Stderr, "acu:", err)
 		os.Exit(1)
 	}
 }

@@ -3,7 +3,7 @@ package guardian
 import (
 	"testing"
 
-	"github.com/rectcircle/acu-helper/internal/ipc"
+	"github.com/rectcircle/acu/internal/ipc"
 )
 
 func TestValidateHelloModes(t *testing.T) {

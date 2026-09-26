@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rectcircle/acu-helper/internal/ipc"
-	"github.com/rectcircle/acu-helper/internal/macos"
+	"github.com/rectcircle/acu/internal/ipc"
+	"github.com/rectcircle/acu/internal/macos"
 )
 
 type guardianMode string
@@ -317,7 +317,7 @@ func (c *Controller) showDiagnostics() {
 		policy,
 		lidSensorDescription(),
 	)
-	macos.ShowPreflightAlert("ACU Helper 诊断", message, failures)
+	macos.ShowPreflightAlert("ACU 诊断", message, failures)
 }
 
 func lidSensorDescription() string {
