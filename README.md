@@ -20,20 +20,22 @@ ACU（Automation / Agent Continuity Utility）是一个 macOS 菜单栏工具，
 
 ```sh
 brew tap rectcircle/acu https://github.com/rectcircle/acu
-brew install --cask --no-quarantine rectcircle/acu/acu
+brew install --cask rectcircle/acu/acu
+xattr -dr com.apple.quarantine /Applications/ACU.app
 ```
 
 升级到最新版本：
 
 ```sh
 brew upgrade --cask rectcircle/acu/acu
+xattr -dr com.apple.quarantine /Applications/ACU.app
 ```
 
-当前发布包使用 ad-hoc 签名，未经 Apple 公证。`--no-quarantine` 仅跳过该安装包的
-Gatekeeper 首次运行检查，不会全局关闭 Gatekeeper，也不会自动授予辅助功能等权限。
-Cask 固定版本和 SHA-256，但仍应仅在信任本仓库及其发布产物时使用该参数。
+当前发布包使用 ad-hoc 签名，未经 Apple 公证。第二条命令仅移除 ACU 的 quarantine，
+绕过该应用的 Gatekeeper 首次运行检查；它不会全局关闭 Gatekeeper，也不会自动授予
+辅助功能等权限。Cask 固定版本和 SHA-256，但仍应仅在信任本仓库及其发布产物时执行。
 
-如果不信任预编译产物，请勿使用 `--no-quarantine`。可以先让代码 Agent 审查源码，
+如果不信任预编译产物，请勿移除 quarantine。可以先让代码 Agent 审查源码，
 重点检查 `Casks/acu.rb`、`internal/macos` 和 `scripts/build-app.sh`，然后从固定标签
 本地编译：
 

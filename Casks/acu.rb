@@ -14,7 +14,8 @@ cask "acu" do
   zap trash: "~/Library/Preferences/github.com.rectcircle.acu.plist"
 
   caveats <<~EOS
-    ACU is ad-hoc signed and is not notarized by Apple. Only use
-    --no-quarantine if you trust this tap and its release artifacts.
+    ACU is ad-hoc signed and is not notarized by Apple. If you trust this tap
+    and its release artifacts, remove quarantine after installation with:
+      xattr -dr com.apple.quarantine /Applications/ACU.app
   EOS
 end

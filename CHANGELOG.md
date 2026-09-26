@@ -8,13 +8,13 @@ and English notes.
 ## [0.1.1] - 2026-09-26
 
 > [!WARNING]
-> Homebrew 安装命令使用 `--no-quarantine`，会跳过该安装包的 Gatekeeper 首次运行检查。
-> 仅在信任本仓库及其发布产物时使用；否则应先审查源码并在本地编译。
+> Homebrew 安装后需要显式移除 ACU 的 quarantine，这会跳过该应用的 Gatekeeper
+> 首次运行检查。仅在信任本仓库及其发布产物时执行；否则应先审查源码并在本地编译。
 >
-> The Homebrew command uses `--no-quarantine`, which skips Gatekeeper's
-> first-launch assessment for this installation. Use it only if you trust this
-> repository and its release artifacts; otherwise review and build the source
-> locally.
+> The Homebrew flow requires explicitly removing quarantine from ACU after
+> installation. This skips Gatekeeper's first-launch assessment for the app.
+> Only do this if you trust this repository and its release artifacts;
+> otherwise review and build the source locally.
 
 ### 中文
 
@@ -24,8 +24,7 @@ and English notes.
 
 #### 变更
 
-- Homebrew Cask 改为固定版本和 SHA-256，并明确使用
-  `--no-quarantine` 安装未公证版本的风险。
+- Homebrew Cask 改为固定版本和 SHA-256，并明确安装后移除 quarantine 的风险。
 - 发布流水线会在创建 Release 后，使用实际产物版本和 SHA-256 自动更新 Cask。
 - README 增加由代码 Agent 审查源码后进行本地编译的替代安装流程。
 
@@ -39,7 +38,7 @@ and English notes.
 #### Changed
 
 - Pinned the Homebrew Cask version and SHA-256 checksum, with an explicit
-  warning about installing the unnotarized build using `--no-quarantine`.
+  warning about removing quarantine from the unnotarized build.
 - The release workflow now updates the Cask with the released version and
   actual SHA-256 checksum after creating the GitHub Release.
 - Added an alternative installation flow for reviewing the source with a code

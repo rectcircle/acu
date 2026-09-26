@@ -728,7 +728,7 @@ cgo 链接：
 ### 14.2 签名
 
 零成本分发使用 ad-hoc 签名，不进行 Apple 公证。Homebrew Cask 必须固定版本和
-SHA-256，并由用户显式选择 `--no-quarantine`；不得在安装脚本中静默移除 quarantine，
+SHA-256；安装后仅允许用户显式移除 ACU 自身的 quarantine，不得在安装脚本中静默执行，
 也不得要求用户全局关闭 Gatekeeper。不信任预编译产物时应从固定标签审查并本地构建。
 稳定的无提示分发仍需使用 Developer ID、Hardened Runtime 和 notarization。
 每次更新签名 identity 后都要回归 Accessibility 权限迁移行为。

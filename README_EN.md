@@ -24,25 +24,27 @@ language configured in macOS. Restart ACU after changing the language.
 
 ```sh
 brew tap rectcircle/acu https://github.com/rectcircle/acu
-brew install --cask --no-quarantine rectcircle/acu/acu
+brew install --cask rectcircle/acu/acu
+xattr -dr com.apple.quarantine /Applications/ACU.app
 ```
 
 Upgrade to the latest version:
 
 ```sh
 brew upgrade --cask rectcircle/acu/acu
+xattr -dr com.apple.quarantine /Applications/ACU.app
 ```
 
 Current release builds use an ad-hoc signature and are not notarized by Apple.
-`--no-quarantine` skips Gatekeeper's first-launch assessment only for this
-installation. It does not disable Gatekeeper globally or grant permissions such
-as Accessibility. The Cask pins both the version and SHA-256 checksum, but this
-option should still be used only when you trust this repository and its release
-artifacts.
+The second command removes quarantine only from ACU, bypassing Gatekeeper's
+first-launch assessment for this app. It does not disable Gatekeeper globally
+or grant permissions such as Accessibility. The Cask pins both the version and
+SHA-256 checksum, but this command should still be used only when you trust this
+repository and its release artifacts.
 
-If you do not trust the prebuilt artifact, do not use `--no-quarantine`. Ask a
-code agent to review the source, especially `Casks/acu.rb`, `internal/macos`,
-and `scripts/build-app.sh`, then build locally from a fixed tag:
+If you do not trust the prebuilt artifact, do not remove quarantine. Ask a code
+agent to review the source, especially `Casks/acu.rb`, `internal/macos`, and
+`scripts/build-app.sh`, then build locally from a fixed tag:
 
 ```sh
 git clone https://github.com/rectcircle/acu.git
