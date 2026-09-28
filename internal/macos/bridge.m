@@ -1354,10 +1354,20 @@ static NSURL *wallpaper_extension_preview_url(NSURL *extension,
 static NSURL *wallpaper_file_url(id value) {
     if ([value isKindOfClass:[NSURL class]]) {
         NSURL *url = value;
-        return url.isFileURL ? url : nil;
+        return url.isFileURL &&
+                       [[NSFileManager defaultManager]
+                           isReadableFileAtPath:url.path]
+                   ? url
+                   : nil;
     }
     if ([value isKindOfClass:[NSString class]]) {
-        NSString *path = value;
+        NSString *path = [(NSString *)value stringByExpandingTildeInPath];
+        NSURL *url = [NSURL URLWithString:path];
+        if (url.isFileURL &&
+            [[NSFileManager defaultManager]
+                isReadableFileAtPath:url.path]) {
+            return url;
+        }
         if ([[NSFileManager defaultManager] isReadableFileAtPath:path]) {
             return [NSURL fileURLWithPath:path];
         }
@@ -1372,7 +1382,11 @@ static NSURL *wallpaper_file_url(id value) {
                                  relativeToURL:nil
                            bookmarkDataIsStale:&stale
                                          error:nil];
-        return url.isFileURL ? url : nil;
+        return url.isFileURL &&
+                       [[NSFileManager defaultManager]
+                           isReadableFileAtPath:url.path]
+                   ? url
+                   : nil;
     }
     if ([value isKindOfClass:[NSArray class]]) {
         for (id child in (NSArray *)value) {
@@ -1382,7 +1396,20 @@ static NSURL *wallpaper_file_url(id value) {
             }
         }
     } else if ([value isKindOfClass:[NSDictionary class]]) {
-        for (id child in [(NSDictionary *)value allValues]) {
+        NSDictionary *dictionary = value;
+        NSString *relative = dictionary[@"relative"];
+        if ([relative isKindOfClass:[NSString class]]) {
+            NSURL *baseURL = wallpaper_file_url(dictionary[@"relativeTo"]);
+            NSURL *url =
+                [[NSURL URLWithString:relative relativeToURL:baseURL]
+                    absoluteURL];
+            if (url.isFileURL &&
+                [[NSFileManager defaultManager]
+                    isReadableFileAtPath:url.path]) {
+                return url;
+            }
+        }
+        for (id child in dictionary.allValues) {
             NSURL *url = wallpaper_file_url(child);
             if (url != nil) {
                 return url;
@@ -1390,6 +1417,40 @@ static NSURL *wallpaper_file_url(id value) {
         }
     }
     return nil;
+}
+
+static NSURL *wallpaper_displayable_image_url(NSURL *url) {
+    if (url == nil ||
+        ![url.pathExtension.lowercaseString isEqualToString:@"madesktop"]) {
+        return url;
+    }
+    NSDictionary *metadata =
+        [NSDictionary dictionaryWithContentsOfURL:url];
+    NSURL *thumbnail = wallpaper_file_url(metadata[@"thumbnailPath"]);
+    return thumbnail != nil ? thumbnail : url;
+}
+
+static BOOL wallpaper_url_is_video(NSURL *url) {
+    static NSSet<NSString *> *extensions;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+      extensions = [NSSet setWithArray:@[@"m4v", @"mov", @"mp4"]];
+    });
+    return url != nil &&
+           [extensions containsObject:url.pathExtension.lowercaseString];
+}
+
+static NSURL *wallpaper_sibling_video_url(NSURL *imageURL) {
+    if (imageURL == nil || !imageURL.isFileURL) {
+        return nil;
+    }
+    NSURL *videoURL =
+        [[[imageURL URLByDeletingPathExtension]
+            URLByAppendingPathExtension:@"mov"] standardizedURL];
+    return [[NSFileManager defaultManager]
+               isReadableFileAtPath:videoURL.path]
+               ? videoURL
+               : nil;
 }
 
 static NSDictionary *wallpaper_entry_with_id(id value,
@@ -1441,20 +1502,25 @@ static NSURL *aerial_remote_video_url(NSDictionary *choice,
         return nil;
     }
 
-    NSString *aerialsRoot =
+    NSString *modernAerialsRoot =
         [NSHomeDirectory()
             stringByAppendingPathComponent:
                 @"Library/Application Support/com.apple.wallpaper/aerials"];
-    NSString *manifestPath =
-        [aerialsRoot stringByAppendingPathComponent:
-                         @"manifest/entries.json"];
-    NSData *manifestData = [NSData dataWithContentsOfFile:manifestPath];
-    if (manifestData == nil) {
-        manifestPath =
-            @"/System/Library/ExtensionKit/Extensions/"
-             "WallpaperAerialsExtension.appex/Contents/Resources/"
-             "entries.json";
+    NSString *legacyAerialsRoot =
+        @"/Library/Application Support/com.apple.idleassetsd";
+    NSArray<NSString *> *manifestPaths = @[
+      [modernAerialsRoot stringByAppendingPathComponent:
+                             @"manifest/entries.json"],
+      [legacyAerialsRoot stringByAppendingPathComponent:
+                             @"Customer/entries.json"],
+      @"/System/Library/ExtensionKit/Extensions/WallpaperAerialsExtension.appex/Contents/Resources/entries.json",
+    ];
+    NSData *manifestData = nil;
+    for (NSString *manifestPath in manifestPaths) {
         manifestData = [NSData dataWithContentsOfFile:manifestPath];
+        if (manifestData != nil) {
+            break;
+        }
     }
     NSDictionary *manifest =
         manifestData == nil
@@ -1516,23 +1582,51 @@ static NSURL *aerial_remote_video_url(NSDictionary *choice,
     }
 
     if (localVideoURL != NULL) {
-        NSString *localPath =
-            [[aerialsRoot stringByAppendingPathComponent:@"videos"]
-                stringByAppendingPathComponent:
-                    [assetID stringByAppendingPathExtension:@"mov"]];
-        if ([[NSFileManager defaultManager]
-                isReadableFileAtPath:localPath]) {
-            *localVideoURL = [NSURL fileURLWithPath:localPath];
+        NSArray<NSString *> *videoDirectories = @[
+          [modernAerialsRoot stringByAppendingPathComponent:@"videos"],
+          [legacyAerialsRoot stringByAppendingPathComponent:
+                                 @"Customer/4KSDR240FPS"],
+          [legacyAerialsRoot stringByAppendingPathComponent:
+                                 @"Customer/4KSDR"],
+          [legacyAerialsRoot stringByAppendingPathComponent:
+                                 @"Customer/2KSDR"],
+          [legacyAerialsRoot stringByAppendingPathComponent:
+                                 @"Customer/2KAVC"],
+          [legacyAerialsRoot stringByAppendingPathComponent:
+                                 @"Customer/4KHDR"],
+          [legacyAerialsRoot stringByAppendingPathComponent:
+                                 @"Customer/2KHDR"],
+        ];
+        NSString *videoName =
+            [assetID stringByAppendingPathExtension:@"mov"];
+        for (NSString *directory in videoDirectories) {
+            NSString *localPath =
+                [directory stringByAppendingPathComponent:videoName];
+            if ([[NSFileManager defaultManager]
+                    isReadableFileAtPath:localPath]) {
+                *localVideoURL = [NSURL fileURLWithPath:localPath];
+                break;
+            }
         }
     }
     if (posterURL != NULL) {
-        NSString *posterPath =
-            [[aerialsRoot stringByAppendingPathComponent:@"thumbnails"]
-                stringByAppendingPathComponent:
-                    [assetID stringByAppendingPathExtension:@"png"]];
-        if ([[NSFileManager defaultManager]
-                isReadableFileAtPath:posterPath]) {
-            *posterURL = [NSURL fileURLWithPath:posterPath];
+        NSArray<NSString *> *posterPaths = @[
+          [[modernAerialsRoot
+              stringByAppendingPathComponent:@"thumbnails"]
+              stringByAppendingPathComponent:
+                  [assetID stringByAppendingPathExtension:@"png"]],
+          [[legacyAerialsRoot
+              stringByAppendingPathComponent:@"snapshots"]
+              stringByAppendingPathComponent:
+                  [NSString stringWithFormat:
+                                @"asset-preview-%@.jpg", assetID]],
+        ];
+        for (NSString *posterPath in posterPaths) {
+            if ([[NSFileManager defaultManager]
+                    isReadableFileAtPath:posterPath]) {
+                *posterURL = [NSURL fileURLWithPath:posterPath];
+                break;
+            }
         }
     }
 
@@ -1622,20 +1716,35 @@ static NSURL *selected_desktop_remote_video_url(NSScreen *screen,
     NSDictionary *choice =
         selected_desktop_wallpaper_choice(screen);
     NSString *provider = choice[@"Provider"];
+    NSURL *remoteURL = nil;
     if ([provider isEqualToString:@"com.apple.wallpaper.choice.aerials"]) {
-        return aerial_remote_video_url(
+        remoteURL = aerial_remote_video_url(
             choice, screen, posterURL, localVideoURL);
+    } else {
+        remoteURL =
+            extension_remote_video_url(provider, screen, posterURL);
     }
-    NSURL *remoteURL =
-        extension_remote_video_url(provider, screen, posterURL);
+
+    NSURL *choiceURL = wallpaper_file_url(choice[@"Files"]);
+    if (localVideoURL != NULL && *localVideoURL == nil &&
+        wallpaper_url_is_video(choiceURL)) {
+        *localVideoURL = choiceURL;
+    }
     if (posterURL != NULL && *posterURL == nil) {
-        *posterURL = wallpaper_file_url(choice[@"Files"]);
-        if (*posterURL == nil &&
-            ([provider containsString:@".image"] ||
-             [provider containsString:@".legacy"])) {
+        if (!wallpaper_url_is_video(choiceURL)) {
             *posterURL =
+                wallpaper_displayable_image_url(choiceURL);
+        }
+        if (*posterURL == nil) {
+            NSURL *workspaceURL =
                 [[NSWorkspace sharedWorkspace]
                     desktopImageURLForScreen:screen];
+            *posterURL =
+                wallpaper_displayable_image_url(workspaceURL);
+            if (localVideoURL != NULL && *localVideoURL == nil) {
+                *localVideoURL =
+                    wallpaper_sibling_video_url(*posterURL);
+            }
         }
     }
     return remoteURL;

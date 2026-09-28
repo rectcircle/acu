@@ -25,21 +25,22 @@ language configured in macOS. Restart ACU after changing the language.
 ```sh
 brew tap rectcircle/acu https://github.com/rectcircle/acu
 brew install --cask rectcircle/acu/acu
-xattr -dr com.apple.quarantine /Applications/ACU.app
+/usr/bin/xattr -dr com.apple.quarantine /Applications/ACU.app
 ```
 
 Upgrade to the latest version:
 
 ```sh
 brew upgrade --cask rectcircle/acu/acu
-xattr -dr com.apple.quarantine /Applications/ACU.app
+/usr/bin/xattr -dr com.apple.quarantine /Applications/ACU.app
 ```
 
 Current release builds use an ad-hoc signature and are not notarized by Apple.
-The second command removes quarantine only from ACU, bypassing Gatekeeper's
-first-launch assessment for this app. It does not disable Gatekeeper globally
-or grant permissions such as Accessibility. The Cask pins both the version and
-SHA-256 checksum, but this command should still be used only when you trust this
+The second command explicitly uses the macOS system `/usr/bin/xattr` to
+recursively remove quarantine only from ACU, bypassing Gatekeeper's first-launch
+assessment for this app. It does not disable Gatekeeper globally or grant
+permissions such as Accessibility. The Cask pins both the version and SHA-256
+checksum, but this command should still be used only when you trust this
 repository and its release artifacts.
 
 If you do not trust the prebuilt artifact, do not remove quarantine. Ask a code
@@ -49,7 +50,7 @@ agent to review the source, especially `Casks/acu.rb`, `internal/macos`, and
 ```sh
 git clone https://github.com/rectcircle/acu.git
 cd acu
-git checkout v0.1.1
+git checkout v0.1.2
 go test ./...
 ./scripts/build-app.sh
 open "build/ACU.app"
@@ -70,10 +71,10 @@ open "build/ACU.app"
 Build a release archive that supports both Apple Silicon and Intel Macs:
 
 ```sh
-./scripts/package-release.sh 0.1.1
+./scripts/package-release.sh 0.1.2
 ```
 
-Pushing a tag such as `v0.1.1` runs the GitHub Actions workflow, which tests the
+Pushing a tag such as `v0.1.2` runs the GitHub Actions workflow, which tests the
 project, builds `ACU.tar.gz`, and creates a release. Release notes come from the
 matching bilingual section in `CHANGELOG.md`; publishing fails if that version
 is missing. After publishing, the workflow updates the Homebrew Cask with the

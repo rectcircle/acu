@@ -21,19 +21,20 @@ ACU（Automation / Agent Continuity Utility）是一个 macOS 菜单栏工具，
 ```sh
 brew tap rectcircle/acu https://github.com/rectcircle/acu
 brew install --cask rectcircle/acu/acu
-xattr -dr com.apple.quarantine /Applications/ACU.app
+/usr/bin/xattr -dr com.apple.quarantine /Applications/ACU.app
 ```
 
 升级到最新版本：
 
 ```sh
 brew upgrade --cask rectcircle/acu/acu
-xattr -dr com.apple.quarantine /Applications/ACU.app
+/usr/bin/xattr -dr com.apple.quarantine /Applications/ACU.app
 ```
 
-当前发布包使用 ad-hoc 签名，未经 Apple 公证。第二条命令仅移除 ACU 的 quarantine，
-绕过该应用的 Gatekeeper 首次运行检查；它不会全局关闭 Gatekeeper，也不会自动授予
-辅助功能等权限。Cask 固定版本和 SHA-256，但仍应仅在信任本仓库及其发布产物时执行。
+当前发布包使用 ad-hoc 签名，未经 Apple 公证。第二条命令显式调用 macOS 系统自带的
+`/usr/bin/xattr`，递归移除 ACU 的 quarantine，绕过该应用的 Gatekeeper 首次运行
+检查；它不会全局关闭 Gatekeeper，也不会自动授予辅助功能等权限。Cask 固定版本和
+SHA-256，但仍应仅在信任本仓库及其发布产物时执行。
 
 如果不信任预编译产物，请勿移除 quarantine。可以先让代码 Agent 审查源码，
 重点检查 `Casks/acu.rb`、`internal/macos` 和 `scripts/build-app.sh`，然后从固定标签
@@ -42,7 +43,7 @@ xattr -dr com.apple.quarantine /Applications/ACU.app
 ```sh
 git clone https://github.com/rectcircle/acu.git
 cd acu
-git checkout v0.1.1
+git checkout v0.1.2
 go test ./...
 ./scripts/build-app.sh
 open "build/ACU.app"
@@ -62,10 +63,10 @@ open "build/ACU.app"
 生成同时支持 Apple Silicon 和 Intel Mac 的发布包：
 
 ```sh
-./scripts/package-release.sh 0.1.1
+./scripts/package-release.sh 0.1.2
 ```
 
-推送 `v0.1.1` 格式的标签后，GitHub Actions 会自动测试、构建
+推送 `v0.1.2` 格式的标签后，GitHub Actions 会自动测试、构建
 `ACU.tar.gz` 并创建 Release。Release Notes 来自 `CHANGELOG.md` 中对应版本的双语
 章节；缺少该版本时发布会失败。发布成功后，流水线会使用实际产物的 SHA-256 更新
 Homebrew Cask。
