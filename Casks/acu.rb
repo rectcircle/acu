@@ -16,6 +16,6 @@ cask "acu" do
   caveats <<~EOS
     ACU is ad-hoc signed and is not notarized by Apple. If you trust this tap
     and its release artifacts, remove quarantine after installation with:
-      xattr -dr com.apple.quarantine /Applications/ACU.app
+      /usr/bin/xattr -dr com.apple.quarantine /Applications/ACU.app
   EOS
 end

@@ -5,6 +5,45 @@
 This file records notable changes to ACU. Every release includes both Chinese
 and English notes.
 
+## [0.1.2] - 2026-09-28
+
+> [!WARNING]
+> Homebrew 安装后需要显式运行
+> `/usr/bin/xattr -dr com.apple.quarantine /Applications/ACU.app`，这会跳过
+> 该应用的 Gatekeeper 首次运行检查。仅在信任本仓库及其发布产物时执行。
+>
+> After installing with Homebrew, explicitly run
+> `/usr/bin/xattr -dr com.apple.quarantine /Applications/ACU.app`. This skips
+> Gatekeeper's first-launch assessment for the app. Only do this if you trust
+> this repository and its release artifacts.
+
+### 中文
+
+#### 修复
+
+- 修复 macOS 15 上 Wallpaper Store 的 `file://` 资源无法解析，导致模拟锁屏无法展示
+  当前系统背景的问题。
+- 兼容 macOS 15 的 Aerial 墙纸清单、视频缓存和预览图目录，同时保留新版 macOS
+  的墙纸资源路径。
+- 当墙纸 Provider 为 `default` 或私有资源不可用时，回退到 macOS 提供的当前桌面
+  图片。
+- 安装与升级说明改为显式调用系统 `/usr/bin/xattr`，避免 Conda/Python 的同名工具
+  不支持递归参数。
+
+### English
+
+#### Fixed
+
+- Fixed Wallpaper Store `file://` resource parsing on macOS 15, which prevented
+  the simulated lock screen from displaying the current system background.
+- Added support for the macOS 15 Aerial manifest, video cache, and preview
+  directories while retaining the wallpaper resource paths used by newer
+  macOS versions.
+- Added a fallback to the current desktop image provided by macOS when the
+  wallpaper provider is `default` or private resources are unavailable.
+- Updated installation and upgrade instructions to invoke `/usr/bin/xattr`
+  explicitly, avoiding incompatible commands supplied by Conda or Python.
+
 ## [0.1.1] - 2026-09-26
 
 > [!WARNING]
