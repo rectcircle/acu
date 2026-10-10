@@ -1,6 +1,16 @@
 "menu.enable_protection" = "Enable Simulated Lock Screen";
 "menu.keep_awake" = "Prevent System Lock Only";
 "menu.keep_awake.stop" = "Stop Preventing System Lock";
+"menu.bluetooth_presence" = "Bluetooth Departure Lock";
+"menu.bluetooth_presence.format" = "Bluetooth Departure Lock (%@)";
+"menu.bluetooth_presence.toggle" = "Enable Lock on Departure";
+"menu.bluetooth_presence.no_devices" = "No paired Bluetooth devices";
+"menu.bluetooth_presence.device_format" = "%@ (%@)";
+"menu.bluetooth_presence.disabled" = "Feature is disabled";
+"menu.bluetooth_presence.unavailable" = "Unable to read device connection state";
+"menu.bluetooth_presence.waiting" = "Waiting to reconnect after unlock";
+"menu.bluetooth_presence.armed" = "Armed: lock after 3 seconds disconnected";
+"menu.bluetooth_presence.connecting" = "Connecting or waiting for a stable Bluetooth connection";
 "menu.shield_background" = "Simulated Lock Screen Background";
 "menu.background.system" = "Current System Background (Generated Wallpapers Unsupported)";
 "menu.background.black" = "Black";

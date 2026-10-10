@@ -43,7 +43,7 @@ SHA-256，但仍应仅在信任本仓库及其发布产物时执行。
 ```sh
 git clone https://github.com/rectcircle/acu.git
 cd acu
-git checkout v0.1.2
+git checkout v0.1.3
 go test ./...
 ./scripts/build-app.sh
 open "build/ACU.app"
@@ -63,10 +63,10 @@ open "build/ACU.app"
 生成同时支持 Apple Silicon 和 Intel Mac 的发布包：
 
 ```sh
-./scripts/package-release.sh 0.1.2
+./scripts/package-release.sh 0.1.3
 ```
 
-推送 `v0.1.2` 格式的标签后，GitHub Actions 会自动测试、构建
+推送 `v0.1.3` 格式的标签后，GitHub Actions 会自动测试、构建
 `ACU.tar.gz` 并创建 Release。Release Notes 来自 `CHANGELOG.md` 中对应版本的双语
 章节；缺少该版本时发布会失败。发布成功后，流水线会使用实际产物的 SHA-256 更新
 Homebrew Cask。
@@ -86,6 +86,15 @@ Homebrew Cask。
 展开到阈值以上 `5°` 时自动打开 Touch ID/系统密码认证面板。完全合盖且有外接显示器
 或合盖导致系统会话锁定时不会触发，重新完全展开前也不会补触发。该功能仅支持带兼容铰链角度传感器的
 MacBook；可在“权限诊断”中查看实时角度或不可用状态。
+
+“蓝牙离开自动模拟锁屏”可选择一个已配对设备作为探测设备。设备连接稳定后进入布防；
+启用功能或更换探测设备后，如果设备未连接，ACU 会主动连接并每 20 秒重试。断连持续 3 秒后
+开启模拟锁屏。认证解锁后，ACU 恢复连接尝试；连接稳定 5 秒后恢复布防。设备列表来自 macOS
+当前已配对设备。布防期间通过蓝牙断开通知启动离开防抖，并在防抖期间检查是否恢复连接；通知
+不可用时会继续轮询连接状态。
+如果尚未布防或设备状态不可用，ACU 不会因断连触发保护。不同安卓机型对 macOS 发起的
+底层蓝牙连接支持不同；如果连接无法恢复，菜单会显示等待状态，不会显示已布防。该功能
+需 ACU 保持运行；Mac 蓝牙关闭、设备取消配对或连接状态不可用时不会判定为离开。
 
 首次验收请按住 `Option` 点击菜单栏图标，再选择“测试模拟锁屏（15 秒自动退出）”。
 “权限诊断”也位于这个隐藏菜单中。测试模式使用完整的保护层和

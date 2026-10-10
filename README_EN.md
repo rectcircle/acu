@@ -50,7 +50,7 @@ agent to review the source, especially `Casks/acu.rb`, `internal/macos`, and
 ```sh
 git clone https://github.com/rectcircle/acu.git
 cd acu
-git checkout v0.1.2
+git checkout v0.1.3
 go test ./...
 ./scripts/build-app.sh
 open "build/ACU.app"
@@ -71,10 +71,10 @@ open "build/ACU.app"
 Build a release archive that supports both Apple Silicon and Intel Macs:
 
 ```sh
-./scripts/package-release.sh 0.1.2
+./scripts/package-release.sh 0.1.3
 ```
 
-Pushing a tag such as `v0.1.2` runs the GitHub Actions workflow, which tests the
+Pushing a tag such as `v0.1.3` runs the GitHub Actions workflow, which tests the
 project, builds `ACU.tar.gz`, and creates a release. Release notes come from the
 matching bilingual section in `CHANGELOG.md`; publishing fails if that version
 is missing. After publishing, the workflow updates the Homebrew Cask with the
@@ -104,6 +104,17 @@ session, does not trigger protection. Protection will not trigger later until
 the lid has been fully reopened. This feature requires a MacBook with a
 compatible hinge-angle sensor. Hold `Option` while opening the menu and select
 "Permission Diagnostics" to inspect the current angle or unavailable status.
+
+"Bluetooth Departure Lock" can use a paired device as a presence probe. ACU
+initiates a connection when the feature is enabled or a device is selected,
+then retries every 20 seconds if needed. A stable connection arms protection;
+after a disconnect notification, ACU checks for recovery during a 3-second
+grace period before showing the simulated lock screen. After authentication,
+connection attempts resume and a stable connection rearms protection. The
+device list is deduplicated by Bluetooth address and shows each address to
+distinguish devices with the same name. Connection and reconnection support
+depends on macOS and the Bluetooth device; ACU must remain running for this
+feature.
 
 For initial validation, hold `Option` while clicking the menu bar icon, then
 select "Test Simulated Lock Screen (Stops After 15 Seconds)." "Permission

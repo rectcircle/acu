@@ -38,13 +38,18 @@ type childEvent struct {
 }
 
 type Controller struct {
-	child                    *guardianProcess
-	childEvents              chan childEvent
-	quitWhenDisabled         bool
-	keepAwakeRequested       bool
-	pendingProtection        bool
-	pendingProtectionTimeout int
-	lidAutomation            *lidAutomation
+	child                           *guardianProcess
+	childEvents                     chan childEvent
+	quitWhenDisabled                bool
+	keepAwakeRequested              bool
+	pendingProtection               bool
+	pendingProtectionTimeout        int
+	lidAutomation                   *lidAutomation
+	bluetoothPresence               *bluetoothPresenceAutomation
+	bluetoothStatus                 string
+	bluetoothDisconnectWatchAddress string
+	bluetoothDisconnectWatchActive  bool
+	bluetoothDisconnectDebouncing   bool
 }
 
 func Run() error {
@@ -58,7 +63,11 @@ func Run() error {
 			lidConfig.Enabled,
 			lidConfig.ThresholdAngle,
 		),
+		bluetoothPresence: newBluetoothPresenceAutomation(
+			macos.BluetoothPresenceEnabled(),
+		),
 	}
+	controller.updateBluetoothPresenceStatus(false, false)
 	go controller.loop()
 	// 进程重启后，若用户之前持久化开启了防锁屏，则自动恢复。
 	// 退出应用只停止本次运行，不清除用户偏好。
@@ -79,6 +88,8 @@ func Run() error {
 func (c *Controller) loop() {
 	lidTicker := time.NewTicker(lidPollInterval)
 	defer lidTicker.Stop()
+	bluetoothTicker := time.NewTicker(bluetoothPresencePollInterval)
+	defer bluetoothTicker.Stop()
 	for {
 		select {
 		case action := <-macos.MenuEvents():
@@ -100,6 +111,8 @@ func (c *Controller) loop() {
 				if config.Enabled {
 					c.checkLidAutomationPreflight()
 				}
+			case macos.MenuBluetooth:
+				c.configureBluetoothPresence()
 			case macos.MenuQuit:
 				c.quit()
 			}
@@ -107,7 +120,139 @@ func (c *Controller) loop() {
 			c.handleChildEvent(event)
 		case now := <-lidTicker.C:
 			c.pollLidAutomation(now)
+		case now := <-bluetoothTicker.C:
+			c.pollBluetoothPresence(now)
+		case address := <-macos.BluetoothDisconnectEvents():
+			c.handleBluetoothDisconnect(address)
 		}
+	}
+}
+
+func (c *Controller) configureBluetoothPresence() {
+	enabled := macos.BluetoothPresenceEnabled()
+	c.bluetoothPresence.configure(enabled)
+	c.bluetoothStatus = ""
+	c.syncBluetoothDisconnectWatch()
+	c.pollBluetoothPresence(time.Now())
+}
+
+func (c *Controller) pollBluetoothPresence(now time.Time) {
+	if c.bluetoothPresence == nil {
+		return
+	}
+	if !c.bluetoothPresence.enabled {
+		c.syncBluetoothDisconnectWatch()
+		c.updateBluetoothPresenceStatus(false, false)
+		return
+	}
+	address := macos.BluetoothPresenceAddress()
+	if address == "" {
+		c.bluetoothPresence.observeUnknown()
+		c.syncBluetoothDisconnectWatch()
+		c.updateBluetoothPresenceStatus(false, false)
+		return
+	}
+	if c.bluetoothDisconnectWatchActive &&
+		strings.EqualFold(address, c.bluetoothDisconnectWatchAddress) &&
+		c.bluetoothPresence.armed && !c.bluetoothDisconnectDebouncing {
+		c.observeBluetoothConnection(now, true, address)
+		return
+	}
+
+	status := macos.BluetoothConnectionStatus(address)
+	if status < 0 {
+		c.bluetoothPresence.observeUnknown()
+		if c.bluetoothPresence.armed {
+			c.bluetoothDisconnectDebouncing = true
+		}
+		c.updateBluetoothPresenceStatus(false, false)
+		return
+	}
+	if status == 1 {
+		c.bluetoothDisconnectDebouncing = false
+	}
+	c.observeBluetoothConnection(now, status == 1, address)
+}
+
+func (c *Controller) handleBluetoothDisconnect(address string) {
+	if !c.bluetoothDisconnectWatchActive ||
+		!strings.EqualFold(address, c.bluetoothDisconnectWatchAddress) ||
+		c.bluetoothPresence == nil || !c.bluetoothPresence.armed {
+		return
+	}
+	c.bluetoothDisconnectDebouncing = true
+	c.observeBluetoothConnection(time.Now(), false, address)
+}
+
+func (c *Controller) observeBluetoothConnection(
+	now time.Time,
+	connected bool,
+	address string,
+) {
+	protectionActive := c.pendingProtection ||
+		(c.child != nil && c.child.mode == guardianModeProtection)
+	switch c.bluetoothPresence.observe(now, connected, protectionActive) {
+	case bluetoothPresenceProtect:
+		if !macos.SessionLocked() {
+			c.enable(0)
+		}
+	case bluetoothPresenceConnect:
+		macos.ConnectBluetoothDevice(address)
+	}
+	if !c.bluetoothPresence.armed {
+		c.bluetoothDisconnectDebouncing = false
+	}
+	c.syncBluetoothDisconnectWatch()
+	c.updateBluetoothPresenceStatus(connected, true)
+}
+
+func (c *Controller) syncBluetoothDisconnectWatch() {
+	wantedAddress := ""
+	if c.bluetoothPresence != nil && c.bluetoothPresence.enabled &&
+		c.bluetoothPresence.armed {
+		wantedAddress = macos.BluetoothPresenceAddress()
+	}
+	if strings.EqualFold(wantedAddress, c.bluetoothDisconnectWatchAddress) {
+		return
+	}
+	if c.bluetoothDisconnectWatchAddress != "" {
+		macos.SetBluetoothDisconnectWatch("")
+	}
+	c.bluetoothDisconnectDebouncing = false
+	c.bluetoothDisconnectWatchAddress = wantedAddress
+	c.bluetoothDisconnectWatchActive = false
+	if wantedAddress != "" {
+		c.bluetoothDisconnectWatchActive =
+			macos.SetBluetoothDisconnectWatch(wantedAddress)
+	}
+}
+
+func (c *Controller) updateBluetoothPresenceStatus(
+	connected bool,
+	available bool,
+) {
+	key := "menu.bluetooth_presence.disabled"
+	if c.bluetoothPresence != nil {
+		protectionActive := c.pendingProtection ||
+			(c.child != nil && c.child.mode == guardianModeProtection)
+		switch c.bluetoothPresence.status(
+			connected,
+			available,
+			protectionActive,
+		) {
+		case "unavailable":
+			key = "menu.bluetooth_presence.unavailable"
+		case "waiting_for_return":
+			key = "menu.bluetooth_presence.waiting"
+		case "armed":
+			key = "menu.bluetooth_presence.armed"
+		case "waiting_for_connection":
+			key = "menu.bluetooth_presence.connecting"
+		}
+	}
+	if key != c.bluetoothStatus {
+		c.bluetoothStatus = key
+		macos.SetBluetoothPresenceStatus(text(key))
 	}
 }
 

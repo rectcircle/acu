@@ -8,6 +8,7 @@
 #import <IOKit/hid/IOHIDManager.h>
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <IOKit/graphics/IOGraphicsLib.h>
+#import <IOBluetooth/IOBluetooth.h>
 #import <ServiceManagement/ServiceManagement.h>
 #import <dispatch/dispatch.h>
 #import <dlfcn.h>
@@ -26,6 +27,10 @@ static NSMenuItem *gKeepAwakeMenuItem;
 static NSMenuItem *gLaunchAtLoginMenuItem;
 static NSMenuItem *gLidAutomationMenuItem;
 static NSMenuItem *gLidAngleRootItem;
+static NSMenuItem *gBluetoothPresenceRootItem;
+static NSMenuItem *gBluetoothPresenceToggleItem;
+static NSMenuItem *gBluetoothPresenceStatusItem;
+static NSMenu *gBluetoothDeviceMenu;
 static NSMenuItem *gTestProtectionMenuItem;
 static NSMenuItem *gDiagnosticsMenuItem;
 static NSArray<NSMenuItem *> *gLidAngleMenuItems;
@@ -64,6 +69,63 @@ static NSString *const ACUKeepAwakeEnabledKey =
     @"ACUKeepAwakeEnabled";
 static NSString *const ACULidAngleThresholdKey =
     @"ACULidAngleThreshold";
+static NSString *const ACUBluetoothPresenceEnabledKey =
+    @"ACUBluetoothPresenceEnabled";
+static NSString *const ACUBluetoothPresenceAddressKey =
+    @"ACUBluetoothPresenceAddress";
+static NSString *const ACUBluetoothPresenceNameKey =
+    @"ACUBluetoothPresenceName";
+static NSMutableSet<NSString *> *gBluetoothConnectionsInFlight;
+static IOBluetoothUserNotification *gBluetoothDisconnectNotification;
+static NSString *gBluetoothDisconnectAddress;
+static id gBluetoothDisconnectObserver;
+
+@interface ACUBluetoothDisconnectObserver : NSObject
+@property(nonatomic, copy) NSString *address;
+- (instancetype)initWithAddress:(NSString *)address;
+- (void)deviceDisconnected:(IOBluetoothUserNotification *)notification
+                fromDevice:(IOBluetoothDevice *)device;
+@end
+
+@implementation ACUBluetoothDisconnectObserver
+- (instancetype)initWithAddress:(NSString *)address {
+    self = [super init];
+    if (self != nil) {
+        _address = [address copy];
+    }
+    return self;
+}
+
+- (void)deviceDisconnected:(IOBluetoothUserNotification *)notification
+                fromDevice:(IOBluetoothDevice *)device {
+    (void)notification;
+    NSString *address = device.addressString;
+    if (address.length == 0 || self.address.length == 0 ||
+        [address caseInsensitiveCompare:self.address] != NSOrderedSame) {
+        return;
+    }
+    acuBluetoothDisconnected((char *)address.UTF8String);
+}
+@end
+
+@interface ACUBluetoothConnectionDelegate : NSObject
+- (void)connectionComplete:(IOBluetoothDevice *)device status:(IOReturn)status;
+@end
+
+@implementation ACUBluetoothConnectionDelegate
+- (void)connectionComplete:(IOBluetoothDevice *)device status:(IOReturn)status {
+    (void)status;
+    NSString *address = device.addressString;
+    if (address == nil || gBluetoothConnectionsInFlight == nil) {
+        return;
+    }
+    @synchronized(gBluetoothConnectionsInFlight) {
+        [gBluetoothConnectionsInFlight removeObject:address];
+    }
+}
+@end
+
+static ACUBluetoothConnectionDelegate *gBluetoothConnectionDelegate;
 
 static CFMachPortRef gEventTap;
 static CFRunLoopRef gEventRunLoop;
@@ -104,6 +166,39 @@ typedef NS_ENUM(NSInteger, ACUShieldBackgroundStyle) {
 static BOOL initialize_lid_angle_sensor(void);
 static void update_lid_automation_menu(void);
 static void update_launch_at_login_menu(void);
+static void update_bluetooth_presence_menu(void);
+static void update_bluetooth_device_menu(void);
+static NSString *localized(NSString *key);
+
+static NSString *application_version_text(void) {
+    NSDictionary *info = [NSBundle mainBundle].infoDictionary;
+    NSString *version = info[@"CFBundleShortVersionString"];
+    if (version.length == 0) {
+        version = @"dev";
+    }
+    return [NSString stringWithFormat:@"(v%@)", version];
+}
+
+static void set_state_item_title(NSString *state) {
+    if (gStateItem == nil) {
+        return;
+    }
+
+    NSString *statusText =
+        [NSString stringWithFormat:localized(@"state.format"), state];
+    NSString *versionText = application_version_text();
+    NSMutableAttributedString *title = [[NSMutableAttributedString alloc]
+        initWithString:[statusText stringByAppendingFormat:@" %@", versionText]];
+    NSFont *menuFont = [NSFont menuFontOfSize:0];
+    NSRange versionRange = NSMakeRange(statusText.length + 1, versionText.length);
+    [title addAttribute:NSFontAttributeName
+                  value:[menuFont fontWithSize:MAX(menuFont.pointSize - 1.0, 8.0)]
+                  range:versionRange];
+    [title addAttribute:NSForegroundColorAttributeName
+                  value:NSColor.secondaryLabelColor
+                  range:versionRange];
+    gStateItem.attributedTitle = title;
+}
 
 static NSString *localized(NSString *key) {
     return [[NSBundle mainBundle] localizedStringForKey:key
@@ -347,6 +442,110 @@ static void update_lid_automation_menu(void) {
     }
 }
 
+static NSString *bluetooth_presence_address(void) {
+    return [[NSUserDefaults standardUserDefaults]
+        stringForKey:ACUBluetoothPresenceAddressKey];
+}
+
+static NSString *normalized_bluetooth_address(NSString *address) {
+    if (![address isKindOfClass:[NSString class]] || address.length == 0) {
+        return nil;
+    }
+    NSString *normalized = [address stringByReplacingOccurrencesOfString:@":"
+                                                               withString:@""];
+    normalized = [normalized stringByReplacingOccurrencesOfString:@"-"
+                                                       withString:@""];
+    normalized = [normalized stringByReplacingOccurrencesOfString:@" "
+                                                       withString:@""];
+    normalized = normalized.uppercaseString;
+    return normalized.length > 0 ? normalized : nil;
+}
+
+static BOOL bluetooth_presence_enabled(void) {
+    return [[NSUserDefaults standardUserDefaults]
+        boolForKey:ACUBluetoothPresenceEnabledKey];
+}
+
+static void update_bluetooth_presence_menu(void) {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *address = bluetooth_presence_address();
+    NSString *name = [defaults stringForKey:ACUBluetoothPresenceNameKey];
+    BOOL configured = address.length > 0;
+    gBluetoothPresenceToggleItem.state =
+        bluetooth_presence_enabled() ? NSControlStateValueOn
+                                     : NSControlStateValueOff;
+    gBluetoothPresenceToggleItem.enabled = configured;
+    gBluetoothPresenceRootItem.title =
+        configured && name.length > 0
+            ? [NSString stringWithFormat:localized(
+                                             @"menu.bluetooth_presence.format"),
+                                         name]
+            : localized(@"menu.bluetooth_presence");
+}
+
+static void update_bluetooth_device_menu(void) {
+    if (gBluetoothDeviceMenu == nil) {
+        return;
+    }
+    while (gBluetoothDeviceMenu.numberOfItems > 2) {
+        [gBluetoothDeviceMenu removeItemAtIndex:2];
+    }
+
+    [gBluetoothDeviceMenu addItem:[NSMenuItem separatorItem]];
+    NSMutableDictionary<NSString *, IOBluetoothDevice *> *devicesByAddress =
+        [NSMutableDictionary new];
+    for (IOBluetoothDevice *device in [IOBluetoothDevice pairedDevices]) {
+        NSString *addressKey =
+            normalized_bluetooth_address(device.addressString);
+        if (addressKey != nil && devicesByAddress[addressKey] == nil) {
+            devicesByAddress[addressKey] = device;
+        }
+    }
+    NSArray<IOBluetoothDevice *> *devices =
+        [devicesByAddress.allValues sortedArrayUsingComparator:
+            ^NSComparisonResult(IOBluetoothDevice *left,
+                                IOBluetoothDevice *right) {
+              NSComparisonResult nameOrder =
+                  [left.nameOrAddress localizedCaseInsensitiveCompare:
+                                           right.nameOrAddress];
+              if (nameOrder != NSOrderedSame) {
+                  return nameOrder;
+              }
+              return [left.addressString localizedCaseInsensitiveCompare:
+                                              right.addressString];
+            }];
+    if (devices.count == 0) {
+        NSMenuItem *empty = [[NSMenuItem alloc]
+            initWithTitle:localized(@"menu.bluetooth_presence.no_devices")
+                   action:nil
+            keyEquivalent:@""];
+        empty.enabled = NO;
+        [gBluetoothDeviceMenu addItem:empty];
+    }
+    NSString *selectedAddressKey =
+        normalized_bluetooth_address(bluetooth_presence_address());
+    for (IOBluetoothDevice *device in devices) {
+        NSString *address = device.addressString;
+        NSString *addressKey = normalized_bluetooth_address(address);
+        NSString *name = device.nameOrAddress ?: address;
+        NSMenuItem *item = [[NSMenuItem alloc]
+            initWithTitle:[NSString stringWithFormat:
+                                        localized(
+                                            @"menu.bluetooth_presence.device_format"),
+                                    name,
+                                    address]
+                   action:@selector(selectBluetoothPresenceDevice:)
+            keyEquivalent:@""];
+        item.target = gMenuTarget;
+        item.representedObject = address;
+        item.state = [addressKey isEqualToString:selectedAddressKey]
+                         ? NSControlStateValueOn
+                         : NSControlStateValueOff;
+        [gBluetoothDeviceMenu addItem:item];
+    }
+    update_bluetooth_presence_menu();
+}
+
 static void update_launch_at_login_menu(void) {
     SMAppServiceStatus status = SMAppService.mainAppService.status;
     gLaunchAtLoginMenuItem.state =
@@ -376,6 +575,8 @@ static void show_launch_at_login_error(NSString *action, NSError *error) {
 - (void)diagnostics:(id)sender;
 - (void)toggleLidAutomation:(id)sender;
 - (void)selectLidAngle:(id)sender;
+- (void)toggleBluetoothPresence:(id)sender;
+- (void)selectBluetoothPresenceDevice:(id)sender;
 - (void)selectShieldBackground:(id)sender;
 - (void)selectHotKey:(id)sender;
 - (void)quit:(id)sender;
@@ -389,6 +590,7 @@ static void show_launch_at_login_error(NSString *action, NSError *error) {
     gTestProtectionMenuItem.hidden = !showAdvancedItems;
     gDiagnosticsMenuItem.hidden = !showAdvancedItems;
     update_launch_at_login_menu();
+    update_bluetooth_device_menu();
 }
 - (void)enable:(id)sender {
     (void)sender;
@@ -444,6 +646,31 @@ static void show_launch_at_login_error(NSString *action, NSError *error) {
             forKey:ACULidAngleThresholdKey];
     update_lid_automation_menu();
     acuMenuAction(ACU_MENU_LID_CONFIGURATION);
+}
+- (void)toggleBluetoothPresence:(id)sender {
+    (void)sender;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    BOOL enabled = !bluetooth_presence_enabled();
+    [defaults setBool:enabled forKey:ACUBluetoothPresenceEnabledKey];
+    update_bluetooth_presence_menu();
+    acuMenuAction(ACU_MENU_BLUETOOTH_CONFIGURATION);
+}
+- (void)selectBluetoothPresenceDevice:(id)sender {
+    NSString *address = [sender representedObject];
+    if (![address isKindOfClass:[NSString class]] || address.length == 0) {
+        return;
+    }
+    IOBluetoothDevice *device =
+        [IOBluetoothDevice deviceWithAddressString:address];
+    if (device == nil) {
+        return;
+    }
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setObject:address forKey:ACUBluetoothPresenceAddressKey];
+    [defaults setObject:device.nameOrAddress ?: address
+                 forKey:ACUBluetoothPresenceNameKey];
+    update_bluetooth_device_menu();
+    acuMenuAction(ACU_MENU_BLUETOOTH_CONFIGURATION);
 }
 - (void)selectShieldBackground:(id)sender {
     NSInteger style = [sender tag];
@@ -509,12 +736,8 @@ int acu_init_menu(void) {
         }
         NSMenu *menu = [NSMenu new];
         menu.delegate = gMenuTarget;
-        gStateItem = [[NSMenuItem alloc]
-            initWithTitle:[NSString
-                              stringWithFormat:localized(@"state.format"),
-                                               localized(@"state.disabled")]
-                   action:nil
-            keyEquivalent:@""];
+        gStateItem = [[NSMenuItem alloc] initWithTitle:@"" action:nil keyEquivalent:@""];
+        set_state_item_title(localized(@"state.disabled"));
         [gStateItem setEnabled:NO];
         [menu addItem:gStateItem];
         [menu addItem:[NSMenuItem separatorItem]];
@@ -533,6 +756,29 @@ int acu_init_menu(void) {
                                keyEquivalent:@""];
         gKeepAwakeMenuItem.target = gMenuTarget;
         [menu addItem:gKeepAwakeMenuItem];
+
+        gBluetoothPresenceRootItem = [[NSMenuItem alloc]
+            initWithTitle:localized(@"menu.bluetooth_presence")
+                   action:nil
+            keyEquivalent:@""];
+        gBluetoothDeviceMenu =
+            [[NSMenu alloc] initWithTitle:localized(
+                                            @"menu.bluetooth_presence")];
+        gBluetoothPresenceToggleItem = [[NSMenuItem alloc]
+            initWithTitle:localized(@"menu.bluetooth_presence.toggle")
+                   action:@selector(toggleBluetoothPresence:)
+            keyEquivalent:@""];
+        gBluetoothPresenceToggleItem.target = gMenuTarget;
+        [gBluetoothDeviceMenu addItem:gBluetoothPresenceToggleItem];
+        gBluetoothPresenceStatusItem = [[NSMenuItem alloc]
+            initWithTitle:localized(@"menu.bluetooth_presence.disabled")
+                   action:nil
+            keyEquivalent:@""];
+        gBluetoothPresenceStatusItem.enabled = NO;
+        [gBluetoothDeviceMenu addItem:gBluetoothPresenceStatusItem];
+        [gBluetoothDeviceMenu addItem:[NSMenuItem separatorItem]];
+        gBluetoothPresenceRootItem.submenu = gBluetoothDeviceMenu;
+        [menu addItem:gBluetoothPresenceRootItem];
 
         NSMenuItem *shieldBackgroundRootItem =
             [[NSMenuItem alloc] initWithTitle:localized(
@@ -669,6 +915,10 @@ int acu_init_menu(void) {
                            available);
         initialize_lid_angle_sensor();
         update_lid_automation_menu();
+        gBluetoothConnectionsInFlight = [NSMutableSet new];
+        gBluetoothConnectionDelegate =
+            [ACUBluetoothConnectionDelegate new];
+        update_bluetooth_presence_menu();
         update_shield_background_menu();
         update_launch_at_login_menu();
         // 进程重启后立即恢复防锁屏的勾选状态（不必等子进程上报 awake）。
@@ -711,8 +961,7 @@ void acu_set_menu_state(const char *state) {
     }
     NSString *value = [NSString stringWithUTF8String:state];
     on_main_sync(^{
-      gStateItem.title =
-          [NSString stringWithFormat:localized(@"state.format"), value];
+      set_state_item_title(value);
     });
 }
 
@@ -2385,7 +2634,12 @@ static void initialize_display_services(void) {
 }
 
 static io_service_t io_display_service(CGDirectDisplayID display) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    // Apple provides no replacement for mapping a display ID to its IOKit
+    // service. Keep this as a best-effort fallback for legacy display drivers.
     io_service_t framebuffer = CGDisplayIOServicePort(display);
+#pragma clang diagnostic pop
     if (framebuffer != MACH_PORT_NULL) {
         return IODisplayForFramebuffer(framebuffer, 0);
     }
@@ -2564,4 +2818,160 @@ void acu_set_keep_awake_persisted(int enabled) {
     [[NSUserDefaults standardUserDefaults]
         setBool:enabled != 0
          forKey:ACUKeepAwakeEnabledKey];
+}
+
+int acu_bluetooth_presence_enabled(void) {
+    return bluetooth_presence_enabled() ? 1 : 0;
+}
+
+void acu_set_bluetooth_presence_enabled(int enabled) {
+    [[NSUserDefaults standardUserDefaults]
+        setBool:enabled != 0
+         forKey:ACUBluetoothPresenceEnabledKey];
+    on_main_sync(^{
+      update_bluetooth_presence_menu();
+    });
+}
+
+void acu_set_bluetooth_presence_status(const char *status) {
+    if (status == NULL) {
+        return;
+    }
+    @autoreleasepool {
+        NSString *value = [NSString stringWithUTF8String:status];
+        on_main_sync(^{
+          gBluetoothPresenceStatusItem.title = value;
+        });
+    }
+}
+
+char *acu_bluetooth_presence_address(void) {
+    @autoreleasepool {
+        NSString *address = bluetooth_presence_address();
+        return address.length > 0 ? strdup(address.UTF8String) : NULL;
+    }
+}
+
+int acu_bluetooth_connection_status(const char *address) {
+    if (address == NULL || address[0] == '\0') {
+        return -1;
+    }
+    @autoreleasepool {
+        IOBluetoothHostController *controller =
+            [IOBluetoothHostController defaultController];
+        if (controller == nil ||
+            controller.powerState != kBluetoothHCIPowerStateON) {
+            return -1;
+        }
+        NSString *value = [NSString stringWithUTF8String:address];
+        IOBluetoothDevice *device =
+            [IOBluetoothDevice deviceWithAddressString:value];
+        if (device == nil || !device.isPaired) {
+            return -1;
+        }
+        return device.isConnected ? 1 : 0;
+    }
+}
+
+void acu_bluetooth_connect(const char *address) {
+    if (address == NULL || address[0] == '\0') {
+        return;
+    }
+    @autoreleasepool {
+        NSString *value = [NSString stringWithUTF8String:address];
+        if (gBluetoothConnectionsInFlight == nil) {
+            gBluetoothConnectionsInFlight = [NSMutableSet new];
+            gBluetoothConnectionDelegate =
+                [ACUBluetoothConnectionDelegate new];
+        }
+        @synchronized(gBluetoothConnectionsInFlight) {
+            if ([gBluetoothConnectionsInFlight containsObject:value]) {
+                return;
+            }
+            [gBluetoothConnectionsInFlight addObject:value];
+        }
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+          @autoreleasepool {
+              IOBluetoothDevice *device =
+                  [IOBluetoothDevice deviceWithAddressString:value];
+              if (device == nil || !device.isPaired || device.isConnected) {
+                  @synchronized(gBluetoothConnectionsInFlight) {
+                      [gBluetoothConnectionsInFlight removeObject:value];
+                  }
+                  return;
+              }
+              IOReturn result =
+                  [device openConnection:gBluetoothConnectionDelegate];
+              if (result != kIOReturnSuccess) {
+                  @synchronized(gBluetoothConnectionsInFlight) {
+                      [gBluetoothConnectionsInFlight removeObject:value];
+                  }
+              }
+          }
+        });
+    }
+}
+
+int acu_set_bluetooth_disconnect_watch(const char *address) {
+    @autoreleasepool {
+        NSString *requestedAddress =
+            address != NULL && address[0] != '\0'
+                ? [NSString stringWithUTF8String:address]
+                : nil;
+        __block BOOL registered = NO;
+        on_main_sync(^{
+          if (requestedAddress.length == 0) {
+              [gBluetoothDisconnectNotification unregister];
+              gBluetoothDisconnectNotification = nil;
+              gBluetoothDisconnectObserver = nil;
+              gBluetoothDisconnectAddress = nil;
+              registered = YES;
+              return;
+          }
+          if (gBluetoothDisconnectNotification != nil &&
+              [requestedAddress caseInsensitiveCompare:
+                                    gBluetoothDisconnectAddress] ==
+                  NSOrderedSame) {
+              registered = YES;
+              return;
+          }
+
+          [gBluetoothDisconnectNotification unregister];
+          gBluetoothDisconnectNotification = nil;
+          gBluetoothDisconnectObserver = nil;
+          gBluetoothDisconnectAddress = nil;
+
+          IOBluetoothDevice *device =
+              [IOBluetoothDevice deviceWithAddressString:requestedAddress];
+          if (device == nil || !device.isPaired) {
+              return;
+          }
+
+          gBluetoothDisconnectObserver =
+              [[ACUBluetoothDisconnectObserver alloc]
+                  initWithAddress:requestedAddress];
+          gBluetoothDisconnectAddress = [requestedAddress copy];
+          IOBluetoothUserNotification *notification =
+              [device registerForDisconnectNotification:
+                          gBluetoothDisconnectObserver
+                                               selector:
+                          @selector(deviceDisconnected:fromDevice:)];
+          if (notification == nil) {
+              gBluetoothDisconnectObserver = nil;
+              gBluetoothDisconnectAddress = nil;
+              return;
+          }
+
+          if (!device.isConnected) {
+              [notification unregister];
+              gBluetoothDisconnectObserver = nil;
+              gBluetoothDisconnectAddress = nil;
+              return;
+          }
+
+          gBluetoothDisconnectNotification = notification;
+          registered = YES;
+        });
+        return registered ? 1 : 0;
+    }
 }

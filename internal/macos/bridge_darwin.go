@@ -4,7 +4,7 @@ package macos
 
 /*
 #cgo CFLAGS: -x objective-c -fblocks -fobjc-arc
-#cgo LDFLAGS: -framework AppKit -framework ApplicationServices -framework AVFoundation -framework Carbon -framework ColorSync -framework CoreGraphics -framework CoreFoundation -framework IOKit -framework LocalAuthentication -framework QuartzCore -framework ServiceManagement
+#cgo LDFLAGS: -framework AppKit -framework ApplicationServices -framework AVFoundation -framework Carbon -framework ColorSync -framework CoreGraphics -framework CoreFoundation -framework IOBluetooth -framework IOKit -framework LocalAuthentication -framework QuartzCore -framework ServiceManagement
 #include <stdlib.h>
 #include "bridge.h"
 */
@@ -25,6 +25,7 @@ const (
 	MenuQuit        MenuAction = C.ACU_MENU_QUIT
 	MenuKeepAwake   MenuAction = C.ACU_MENU_KEEP_AWAKE
 	MenuLidConfig   MenuAction = C.ACU_MENU_LID_CONFIGURATION
+	MenuBluetooth   MenuAction = C.ACU_MENU_BLUETOOTH_CONFIGURATION
 )
 
 type PreflightFailures uint32
@@ -39,11 +40,12 @@ const (
 )
 
 var (
-	menuEvents       = make(chan MenuAction, 8)
-	guardianEnter    = make(chan struct{}, 1)
-	tapDegraded      = make(chan struct{}, 1)
-	physicalActivity = make(chan struct{}, 1)
-	lidAngleChanged  = make(chan struct{}, 1)
+	menuEvents                = make(chan MenuAction, 8)
+	guardianEnter             = make(chan struct{}, 1)
+	tapDegraded               = make(chan struct{}, 1)
+	physicalActivity          = make(chan struct{}, 1)
+	lidAngleChanged           = make(chan struct{}, 1)
+	bluetoothDisconnectEvents = make(chan string, 8)
 )
 
 //export acuMenuAction
@@ -86,6 +88,18 @@ func acuLidAngleChanged() {
 	}
 }
 
+//export acuBluetoothDisconnected
+func acuBluetoothDisconnected(address *C.char) {
+	if address == nil {
+		return
+	}
+	value := C.GoString(address)
+	select {
+	case bluetoothDisconnectEvents <- value:
+	default:
+	}
+}
+
 func InitMenu() error {
 	if C.acu_init_menu() == 0 {
 		return errors.New("menu initialization failed")
@@ -111,6 +125,10 @@ func PhysicalActivityEvents() <-chan struct{} {
 
 func LidAngleChangedEvents() <-chan struct{} {
 	return lidAngleChanged
+}
+
+func BluetoothDisconnectEvents() <-chan string {
+	return bluetoothDisconnectEvents
 }
 
 func RunApp() {
@@ -314,4 +332,51 @@ func SetKeepAwakePersisted(enabled bool) {
 		value = 1
 	}
 	C.acu_set_keep_awake_persisted(value)
+}
+
+func BluetoothPresenceEnabled() bool {
+	return C.acu_bluetooth_presence_enabled() != 0
+}
+
+func SetBluetoothPresenceEnabled(enabled bool) {
+	var value C.int
+	if enabled {
+		value = 1
+	}
+	C.acu_set_bluetooth_presence_enabled(value)
+}
+
+func SetBluetoothPresenceStatus(status string) {
+	cStatus := C.CString(status)
+	defer C.free(unsafe.Pointer(cStatus))
+	C.acu_set_bluetooth_presence_status(cStatus)
+}
+
+func BluetoothPresenceAddress() string {
+	value := C.acu_bluetooth_presence_address()
+	if value == nil {
+		return ""
+	}
+	defer C.free(unsafe.Pointer(value))
+	return C.GoString(value)
+}
+
+// BluetoothConnectionStatus returns -1 when the paired device is unavailable,
+// 0 when it is disconnected, and 1 when a baseband connection exists.
+func BluetoothConnectionStatus(address string) int {
+	cAddress := C.CString(address)
+	defer C.free(unsafe.Pointer(cAddress))
+	return int(C.acu_bluetooth_connection_status(cAddress))
+}
+
+func ConnectBluetoothDevice(address string) {
+	cAddress := C.CString(address)
+	defer C.free(unsafe.Pointer(cAddress))
+	C.acu_bluetooth_connect(cAddress)
+}
+
+func SetBluetoothDisconnectWatch(address string) bool {
+	cAddress := C.CString(address)
+	defer C.free(unsafe.Pointer(cAddress))
+	return C.acu_set_bluetooth_disconnect_watch(cAddress) != 0
 }

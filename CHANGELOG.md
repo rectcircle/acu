@@ -5,6 +5,34 @@
 This file records notable changes to ACU. Every release includes both Chinese
 and English notes.
 
+## [0.1.3] - 2026-10-10
+
+### 中文
+
+#### 新增
+
+- 新增“蓝牙离开自动模拟锁屏”：可选择已配对设备，连接稳定后布防，持续断开 3 秒后开启模拟锁屏。
+- 启用功能或选择设备时主动尝试连接；解锁后恢复连接尝试，并在连接稳定后重新布防。
+- 蓝牙设备列表按地址去重并展示地址，便于区分同名设备。
+
+#### 变更
+
+- 已布防时使用蓝牙断开通知及时发现断连，并在 3 秒宽限期内检查连接是否恢复；通知不可用时保留轮询兜底。
+- 菜单状态行展示紧凑版本号。
+
+### English
+
+#### Added
+
+- Added Bluetooth departure protection: choose a paired device, arm after a stable connection, and show the simulated lock screen after it remains disconnected for 3 seconds.
+- ACU now initiates a connection when the feature is enabled or a device is selected. It resumes connection attempts after unlock and rearms after the connection stabilizes.
+- Bluetooth devices are deduplicated by address, which is also displayed to distinguish devices with the same name.
+
+#### Changed
+
+- While armed, ACU uses Bluetooth disconnect notifications for prompt detection and checks for reconnection during a 3-second grace period, with polling as a fallback when notifications are unavailable.
+- The menu status row now includes a compact version number.
+
 ## [0.1.2] - 2026-09-28
 
 > [!WARNING]

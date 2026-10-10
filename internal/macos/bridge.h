@@ -10,6 +10,7 @@ enum {
     ACU_MENU_QUIT = 4,
     ACU_MENU_KEEP_AWAKE = 5,
     ACU_MENU_LID_CONFIGURATION = 6,
+    ACU_MENU_BLUETOOTH_CONFIGURATION = 7,
 };
 
 enum {
@@ -61,10 +62,19 @@ int acu_restore_power_settings(void);
 int acu_keep_awake_persisted(void);
 void acu_set_keep_awake_persisted(int enabled);
 
+int acu_bluetooth_presence_enabled(void);
+void acu_set_bluetooth_presence_enabled(int enabled);
+void acu_set_bluetooth_presence_status(const char *status);
+char *acu_bluetooth_presence_address(void);
+int acu_bluetooth_connection_status(const char *address);
+void acu_bluetooth_connect(const char *address);
+int acu_set_bluetooth_disconnect_watch(const char *address);
+
 void acuMenuAction(int action);
 void acuGuardianEnter(void);
 void acuTapDegraded(void);
 void acuPhysicalActivity(void);
 void acuLidAngleChanged(void);
+void acuBluetoothDisconnected(char *address);
 
 #endif

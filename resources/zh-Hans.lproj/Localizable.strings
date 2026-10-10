@@ -1,6 +1,16 @@
 "menu.enable_protection" = "开启模拟锁屏";
 "menu.keep_awake" = "仅阻止系统锁屏";
 "menu.keep_awake.stop" = "停止阻止系统锁屏";
+"menu.bluetooth_presence" = "蓝牙离开自动模拟锁屏";
+"menu.bluetooth_presence.format" = "蓝牙离开自动模拟锁屏（%@）";
+"menu.bluetooth_presence.toggle" = "启用离开自动模拟锁屏";
+"menu.bluetooth_presence.no_devices" = "没有已配对的蓝牙设备";
+"menu.bluetooth_presence.device_format" = "%@（%@）";
+"menu.bluetooth_presence.disabled" = "功能未启用";
+"menu.bluetooth_presence.unavailable" = "无法读取设备连接状态";
+"menu.bluetooth_presence.waiting" = "等待解锁后重新连接并布防";
+"menu.bluetooth_presence.armed" = "已布防：断连 3 秒后开启模拟锁屏";
+"menu.bluetooth_presence.connecting" = "正在连接或等待蓝牙连接稳定";
 "menu.shield_background" = "模拟锁屏背景";
 "menu.background.system" = "当前系统背景（不支持生成式墙纸）";
 "menu.background.black" = "纯黑";
