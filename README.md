@@ -66,10 +66,15 @@ open "build/ACU.app"
 ./scripts/package-release.sh 0.1.3
 ```
 
-推送 `v0.1.3` 格式的标签后，GitHub Actions 会自动测试、构建
-`ACU.tar.gz` 并创建 Release。Release Notes 来自 `CHANGELOG.md` 中对应版本的双语
-章节；缺少该版本时发布会失败。发布成功后，流水线会使用实际产物的 SHA-256 更新
-Homebrew Cask。
+推送 `v0.1.4` 格式的标签后，GitHub Actions 会自动测试、构建
+`ACU.tar.gz` 并创建**草稿 Release**，此时不会公开发布或更新 Homebrew。
+Release Notes 来自 `CHANGELOG.md` 中对应版本的双语章节；缺少该版本时构建会失败。
+
+验证草稿中的安装包后，打开 **Actions → Release → Run workflow**，选择 `main`，
+在 `version` 中输入对应标签（如 `v0.1.4`）。流水线会核对草稿产物的 SHA-256、
+公开原有产物，并更新 Homebrew Cask，无需重新构建。请通过此入口公开草稿，以同步更新
+Homebrew。公开发布后的版本不会被 tag 构建任务覆盖；修复应使用新版本标签。
+旧版本手动公开不会覆盖更新版本的 Cask，也不会被标记为最新 Release。
 
 首次启用时，需要在“系统设置 > 隐私与安全性 > 辅助功能”中授权 ACU。该权限
 通常已覆盖模拟锁屏所需的事件监听和投递能力；仅当权限诊断仍提示无法监听输入事件时，

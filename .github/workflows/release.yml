@@ -7,15 +7,21 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Existing release tag, for example v0.1.0
+        description: Publish a verified draft release (existing tag, for example v0.1.4)
         required: true
         type: string
 
 permissions:
   contents: write
 
+# Serialize builds and publication so assets and Cask updates cannot race.
+concurrency:
+  group: acu-release
+  cancel-in-progress: false
+
 jobs:
-  release:
+  build-draft:
+    if: github.event_name == 'push'
     runs-on: macos-15
     env:
       ACU_MACOS_DEPLOYMENT_TARGET: "15.0"
@@ -30,6 +36,17 @@ jobs:
           cache: false
           go-version: "1.22.x"
 
+      - name: Refuse to overwrite a public release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft); then
+            if [ "$is_draft" != "true" ]; then
+              echo "::error::Release $RELEASE_TAG is already public; use a new version tag."
+              exit 1
+            fi
+          fi
+
       - name: Extract release notes
         run: |
           mkdir -p build
@@ -40,6 +57,7 @@ jobs:
         run: |
           go test ./...
           go vet ./...
+          python3 -m unittest discover -s scripts/tests
 
       - name: Package universal app
         env:
@@ -70,11 +88,16 @@ jobs:
             fi
           done
 
-      - name: Create GitHub release
+      - name: Create or update draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)
+            if [ "$is_draft" != "true" ]; then
+              echo "::error::Refusing to replace assets of a public release."
+              exit 1
+            fi
             gh release upload "$RELEASE_TAG" \
               build/ACU.tar.gz \
               build/ACU.tar.gz.sha256 \
@@ -88,15 +111,48 @@ jobs:
               build/ACU.tar.gz.sha256 \
               --title "ACU $RELEASE_TAG" \
               --notes-file build/release-notes.md \
+              --draft \
+              --latest=false \
               --verify-tag
           fi
 
-      - name: Update Homebrew cask
+  publish:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - name: Download and verify the reviewed release assets
+        run: |
+          gh release view "$RELEASE_TAG"
+          gh release download "$RELEASE_TAG" --dir build \
+            --pattern ACU.tar.gz --pattern ACU.tar.gz.sha256
+          expected_sha=$(awk 'NR == 1 { print $1 }' build/ACU.tar.gz.sha256)
+          actual_sha=$(sha256sum build/ACU.tar.gz | awk '{ print $1 }')
+          if [ "$expected_sha" != "$actual_sha" ]; then
+            echo "::error::Release asset checksum mismatch."
+            exit 1
+          fi
+
+      - name: Publish the release and update Homebrew cask
         run: |
           sha256=$(awk 'NR == 1 { print $1 }' build/ACU.tar.gz.sha256)
           git fetch origin main
           git checkout -B homebrew-update origin/main
+          current_version=$(awk '/^  version / { gsub(/"/, "", $2); print $2 }' Casks/acu.rb)
+          comparison=$(python3 scripts/compare-versions.py "$RELEASE_TAG" "$current_version")
+          latest=true
+          if [ "$comparison" = "-1" ]; then
+            latest=false
+          fi
           ./scripts/update-cask.sh "$RELEASE_TAG" "$sha256"
+          # Retries also repair the Cask if publication succeeded but pushing failed.
+          gh release edit "$RELEASE_TAG" --draft=false --latest="$latest"
           git add Casks/acu.rb
           if git diff --cached --quiet; then
             exit 0

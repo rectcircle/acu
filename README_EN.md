@@ -74,11 +74,18 @@ Build a release archive that supports both Apple Silicon and Intel Macs:
 ./scripts/package-release.sh 0.1.3
 ```
 
-Pushing a tag such as `v0.1.3` runs the GitHub Actions workflow, which tests the
-project, builds `ACU.tar.gz`, and creates a release. Release notes come from the
-matching bilingual section in `CHANGELOG.md`; publishing fails if that version
-is missing. After publishing, the workflow updates the Homebrew Cask with the
-released version and its actual SHA-256 checksum.
+Pushing a tag such as `v0.1.4` runs tests, builds `ACU.tar.gz`, and creates a
+**draft release**. This does not publish the release or update Homebrew. Release
+notes come from the matching bilingual section in `CHANGELOG.md`; the build
+fails if that version is missing.
+
+After testing the draft's archive, open **Actions → Release → Run workflow**,
+select `main`, and enter its tag (for example, `v0.1.4`) in `version`. The workflow
+verifies the archive's SHA-256, publishes the reviewed assets without rebuilding,
+and updates the Homebrew Cask. Use this entry point to publish drafts so Homebrew
+is updated as well. Tag builds cannot replace public release assets; fixes need
+a new version tag. Publishing an older version does not downgrade the Cask or
+mark that release as latest.
 
 On first use, grant ACU access under System Settings > Privacy & Security >
 Accessibility. This permission normally covers the event monitoring and

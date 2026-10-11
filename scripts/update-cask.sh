@@ -20,6 +20,13 @@ fi
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 CASK="$ROOT/Casks/acu.rb"
+CURRENT_VERSION=$(awk '/^  version / { gsub(/"/, "", $2); print $2 }' "$CASK")
+comparison=$(python3 "$ROOT/scripts/compare-versions.py" "$VERSION" "$CURRENT_VERSION")
+if [ "$comparison" = "-1" ]; then
+  printf 'Skipping Cask downgrade from %s to %s\n' "$CURRENT_VERSION" "$VERSION"
+  exit 0
+fi
+
 TMP=$(mktemp "${TMPDIR:-/tmp}/acu-cask.XXXXXX")
 trap 'rm -f "$TMP"' EXIT
 
