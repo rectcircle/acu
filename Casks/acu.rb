@@ -1,6 +1,6 @@
 cask "acu" do
-  version "0.1.3"
-  sha256 "e9ee542d85f460765051d415277d1369b021b39746f50e330d7c4b30bc93f191"
+  version "0.1.4"
+  sha256 "ebaf0a3e1403b84e15c30fb09fdfea245981c1e3ac47d424175eff7b603f9954"
 
   url "https://github.com/rectcircle/acu/releases/download/v#{version}/ACU.tar.gz"
   name "ACU"
