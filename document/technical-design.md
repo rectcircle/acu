@@ -514,10 +514,12 @@ LAContext *context = [LAContext new];
 
 ### 10.1 会话状态
 
-使用 `CGSessionCopyCurrentDictionary` 读取 `CGSSessionScreenIsLocked`：
+模拟锁屏期间，Guardian 订阅 `NSDistributedNotificationCenter` 的
+`com.apple.screenIsLocked` 通知，收到后立即清理模拟遮罩和输入拦截；每 30 秒使用
+`CGSessionCopyCurrentDictionary` 读取 `CGSSessionScreenIsLocked` 作为兜底：
 
 - 启动时若已锁定，拒绝开启。
-- 运行时若检测到系统已经锁定，停止鼠标 nudge。
+- 运行时若收到锁屏通知或轮询发现系统已锁定，解除模拟锁屏。
 - 工具不尝试自动解锁系统。
 
 ### 10.2 Managed Preference
@@ -769,7 +771,7 @@ SHA-256；安装后仅允许用户显式移除 ACU 自身的 quarantine，不得
 | 屏幕重建失败 | 保留旧遮罩，进入 degraded |
 | Controller 崩溃 | Guardian standalone 运行，Enter 仍可认证 |
 | Guardian 崩溃 | 保护丢失；Controller 显示高优先级错误，不自动假装仍受保护 |
-| 系统实际锁屏 | 停止 nudge，不尝试解锁 |
+| 系统实际锁屏 | 收到系统锁屏通知后清理模拟锁屏遮罩和输入拦截；通知遗漏时由 30 秒轮询兜底 |
 | LocalAuthentication 取消 | 返回 protected |
 
 ## 17. 测试方案

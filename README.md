@@ -13,6 +13,7 @@ ACU（Automation / Agent Continuity Utility）是一个 macOS 菜单栏工具，
 - 通过 macOS 原生 Touch ID 或系统密码认证解除保护。
 
 它不是 macOS 真锁屏，不抵御进程终止、管理员权限或机器重启。
+检测到 macOS 进入真实锁屏后，ACU 会自动解除模拟锁屏，避免系统解锁后仍被模拟遮罩拦住；ACU 不会尝试解锁 macOS。
 
 界面支持简体中文和英文，并跟随 macOS 的首选语言；修改语言后需要重新启动 ACU。
 

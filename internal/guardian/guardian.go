@@ -15,18 +15,19 @@ import (
 )
 
 const (
-	messageHello       = "hello"
-	messageRequestAuth = "request_auth"
-	messageStop        = "stop"
-	messageState       = "state"
-	messageFatal       = "fatal"
-	messageActivity    = "activity"
-	modeProtection     = "protection"
-	modeKeepAwake      = "keep_awake"
-	testTimeoutSeconds = 15
-	idleTimeout        = 15 * time.Second
-	restoreAttempts    = 3
-	restoreRetryDelay  = 100 * time.Millisecond
+	messageHello            = "hello"
+	messageRequestAuth      = "request_auth"
+	messageStop             = "stop"
+	messageState            = "state"
+	messageFatal            = "fatal"
+	messageActivity         = "activity"
+	modeProtection          = "protection"
+	modeKeepAwake           = "keep_awake"
+	testTimeoutSeconds      = 15
+	idleTimeout             = 15 * time.Second
+	restoreAttempts         = 3
+	restoreRetryDelay       = 100 * time.Millisecond
+	sessionLockPollInterval = 30 * time.Second
 )
 
 type command int
@@ -120,11 +121,14 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
+	lockTicker := time.NewTicker(sessionLockPollInterval)
+	defer lockTicker.Stop()
 	go func() {
 		commandChannel := (<-chan command)(commands)
 		failures := 0
 		lastActivity := time.Now()
 		powerSaved := false
+		systemLocked := false
 		// 省电恢复：有物理操作 → 立即恢复显示器亮度。
 		// 事件经 channel 投递至本 goroutine 后恢复，RestorePowerSettings 为轻量 IOKit 调用
 		// 且幂等（gBrightnessSaved 哨兵 + C 侧 mutex），不会阻塞主循环。
@@ -132,6 +136,23 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 			if powerSaved {
 				powerSaved = !macos.RestorePowerSettings()
 			}
+		}
+		disarmForSystemLock := func() bool {
+			state := machine.State()
+			if state != StateProtected && state != StateDegraded &&
+				state != StateAuthenticating {
+				return false
+			}
+			if err := machine.Transition(StateDisarming); err != nil {
+				return false
+			}
+			writeState(conn, StateDisarming)
+			ticker.Stop()
+			cleanup()
+			_ = machine.Transition(StateDisabled)
+			writeState(conn, StateDisabled)
+			macos.StopApp()
+			return true
 		}
 		for {
 			select {
@@ -197,6 +218,26 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 					writeState(conn, StateDegraded)
 					macos.ShowInputGuardFailure()
 				}
+			case <-macos.SessionLockEvents():
+				// Distributed notifications provide the fast path. Remember the
+				// state to suppress cursor nudges while teardown is starting.
+				systemLocked = true
+				if disarmForSystemLock() {
+					return
+				}
+			case <-lockTicker.C:
+				if machine.State() != StateProtected &&
+					machine.State() != StateDegraded &&
+					machine.State() != StateAuthenticating {
+					continue
+				}
+				if !macos.SessionLocked() {
+					continue
+				}
+				systemLocked = true
+				if disarmForSystemLock() {
+					return
+				}
 			case <-ticker.C:
 				// 省电：15 秒无物理操作 → 调低屏幕亮度到 0。
 				// 重检状态：测试模式超时 goroutine 可能在状态检查后、保存前执行 cleanup
@@ -212,7 +253,7 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 
 				// 防锁屏：45 秒无系统活动 → nudge（nudge 事件带 marker，不计为操作）
 				if machine.State() != StateProtected ||
-					macos.SessionLocked() ||
+					systemLocked ||
 					macos.IdleDuration() < cfg.IdleBeforeNudge {
 					continue
 				}

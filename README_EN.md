@@ -16,6 +16,7 @@ clients are running:
 
 ACU is not the macOS system lock screen. It does not protect against process
 termination, administrator access, or machine restarts.
+When macOS enters its real lock screen, ACU automatically dismisses its simulated lock screen so the overlay is gone after system unlock. ACU does not attempt to unlock macOS.
 
 The interface supports English and Simplified Chinese and follows the preferred
 language configured in macOS. Restart ACU after changing the language.

@@ -5,6 +5,16 @@
 This file records notable changes to ACU. Every release includes both Chinese
 and English notes.
 
+## [0.1.4] - 2026-10-13
+
+### 变更
+
+- 检测到 macOS 真实锁屏后自动解除模拟锁屏，避免登录后仍被 ACU 遮罩拦住。
+
+### Changed
+
+- ACU now dismisses its simulated lock screen when macOS enters the real lock screen, so its overlay does not remain after login.
+
 ## [0.1.3] - 2026-10-10
 
 ### 中文

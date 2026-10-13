@@ -75,6 +75,7 @@ void acuGuardianEnter(void);
 void acuTapDegraded(void);
 void acuPhysicalActivity(void);
 void acuLidAngleChanged(void);
+void acuSessionLockEvent(void);
 void acuBluetoothDisconnected(char *address);
 
 #endif

@@ -43,6 +43,7 @@ static NSMutableDictionary<NSString *, NSURLSessionDownloadTask *>
     *gShieldVideoDownloads;
 static id gMenuTarget;
 static id gScreenObserver;
+static id gSessionLockObserver;
 static int gShieldCountdown = -1;
 static CGFloat gShieldMotionOffset;
 static BOOL gShieldMotionMovesUp = YES;
@@ -107,6 +108,39 @@ static id gBluetoothDisconnectObserver;
     acuBluetoothDisconnected((char *)address.UTF8String);
 }
 @end
+
+@interface ACUSessionLockObserver : NSObject
+- (void)screenDidLock:(NSNotification *)notification;
+@end
+
+@implementation ACUSessionLockObserver
+- (void)screenDidLock:(NSNotification *)notification {
+    (void)notification;
+    acuSessionLockEvent();
+}
+@end
+
+static void start_session_lock_observer(void) {
+    if (gSessionLockObserver != nil) {
+        return;
+    }
+    gSessionLockObserver = [ACUSessionLockObserver new];
+    [[NSDistributedNotificationCenter defaultCenter]
+        addObserver:gSessionLockObserver
+           selector:@selector(screenDidLock:)
+               name:@"com.apple.screenIsLocked"
+             object:nil
+  suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
+}
+
+static void stop_session_lock_observer(void) {
+    if (gSessionLockObserver == nil) {
+        return;
+    }
+    [[NSDistributedNotificationCenter defaultCenter]
+        removeObserver:gSessionLockObserver];
+    gSessionLockObserver = nil;
+}
 
 @interface ACUBluetoothConnectionDelegate : NSObject
 - (void)connectionComplete:(IOBluetoothDevice *)device status:(IOReturn)status;
@@ -712,6 +746,7 @@ int acu_init_menu(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        start_session_lock_observer();
 
         gMenuTarget = [ACUMenuTarget new];
         gStatusItem = [[NSStatusBar systemStatusBar]
@@ -2416,6 +2451,7 @@ int acu_show_shields(void) {
       result = rebuild_shields();
       if (result) {
           start_shield_motion_timer();
+          start_session_lock_observer();
       }
       if (result && gScreenObserver == nil) {
           gScreenObserver = [[NSNotificationCenter defaultCenter]
@@ -2434,6 +2470,7 @@ int acu_show_shields(void) {
 void acu_hide_shields(void) {
     on_main_sync(^{
       stop_shield_motion_timer();
+      stop_session_lock_observer();
       if (gScreenObserver != nil) {
           [[NSNotificationCenter defaultCenter] removeObserver:gScreenObserver];
           gScreenObserver = nil;

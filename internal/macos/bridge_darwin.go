@@ -45,6 +45,7 @@ var (
 	tapDegraded               = make(chan struct{}, 1)
 	physicalActivity          = make(chan struct{}, 1)
 	lidAngleChanged           = make(chan struct{}, 1)
+	sessionLockEvents         = make(chan struct{}, 1)
 	bluetoothDisconnectEvents = make(chan string, 8)
 )
 
@@ -88,6 +89,14 @@ func acuLidAngleChanged() {
 	}
 }
 
+//export acuSessionLockEvent
+func acuSessionLockEvent() {
+	select {
+	case sessionLockEvents <- struct{}{}:
+	default:
+	}
+}
+
 //export acuBluetoothDisconnected
 func acuBluetoothDisconnected(address *C.char) {
 	if address == nil {
@@ -125,6 +134,10 @@ func PhysicalActivityEvents() <-chan struct{} {
 
 func LidAngleChangedEvents() <-chan struct{} {
 	return lidAngleChanged
+}
+
+func SessionLockEvents() <-chan struct{} {
+	return sessionLockEvents
 }
 
 func BluetoothDisconnectEvents() <-chan string {

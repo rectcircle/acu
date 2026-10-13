@@ -67,6 +67,9 @@ func Run() error {
 			macos.BluetoothPresenceEnabled(),
 		),
 	}
+	if macos.SessionLocked() {
+		controller.lidAutomation.suppressUntilReopened()
+	}
 	controller.updateBluetoothPresenceStatus(false, false)
 	go controller.loop()
 	// 进程重启后，若用户之前持久化开启了防锁屏，则自动恢复。
@@ -88,6 +91,8 @@ func Run() error {
 func (c *Controller) loop() {
 	lidTicker := time.NewTicker(lidPollInterval)
 	defer lidTicker.Stop()
+	sessionLockTicker := time.NewTicker(30 * time.Second)
+	defer sessionLockTicker.Stop()
 	bluetoothTicker := time.NewTicker(bluetoothPresencePollInterval)
 	defer bluetoothTicker.Stop()
 	for {
@@ -120,6 +125,12 @@ func (c *Controller) loop() {
 			c.handleChildEvent(event)
 		case now := <-lidTicker.C:
 			c.pollLidAutomation(now)
+		case <-macos.SessionLockEvents():
+			c.lidAutomation.suppressUntilReopened()
+		case <-sessionLockTicker.C:
+			if c.lidAutomation.enabled && macos.SessionLocked() {
+				c.lidAutomation.suppressUntilReopened()
+			}
 		case now := <-bluetoothTicker.C:
 			c.pollBluetoothPresence(now)
 		case address := <-macos.BluetoothDisconnectEvents():
@@ -258,10 +269,6 @@ func (c *Controller) updateBluetoothPresenceStatus(
 
 func (c *Controller) pollLidAutomation(now time.Time) {
 	if !c.lidAutomation.enabled {
-		return
-	}
-	if macos.SessionLocked() {
-		c.lidAutomation.suppressUntilReopened()
 		return
 	}
 	angle, ok := macos.ReadLidAngle()
