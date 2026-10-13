@@ -11,7 +11,9 @@ package macos
 import "C"
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"time"
 	"unsafe"
 )
@@ -45,7 +47,7 @@ var (
 	tapDegraded               = make(chan struct{}, 1)
 	physicalActivity          = make(chan struct{}, 1)
 	lidAngleChanged           = make(chan struct{}, 1)
-	sessionLockEvents         = make(chan struct{}, 1)
+	sessionLockEvents         = make(chan string, 4)
 	bluetoothDisconnectEvents = make(chan string, 8)
 )
 
@@ -90,9 +92,11 @@ func acuLidAngleChanged() {
 }
 
 //export acuSessionLockEvent
-func acuSessionLockEvent() {
+func acuSessionLockEvent(source *C.char) {
+	value := C.GoString(source)
+	slog.Info("native session notification", "source", value)
 	select {
-	case sessionLockEvents <- struct{}{}:
+	case sessionLockEvents <- value:
 	default:
 	}
 }
@@ -136,7 +140,7 @@ func LidAngleChangedEvents() <-chan struct{} {
 	return lidAngleChanged
 }
 
-func SessionLockEvents() <-chan struct{} {
+func SessionLockEvents() <-chan string {
 	return sessionLockEvents
 }
 
@@ -392,4 +396,9 @@ func SetBluetoothDisconnectWatch(address string) bool {
 	cAddress := C.CString(address)
 	defer C.free(unsafe.Pointer(cAddress))
 	return C.acu_set_bluetooth_disconnect_watch(cAddress) != 0
+}
+
+//export acuLog
+func acuLog(level C.int, message *C.char) {
+	slog.Log(context.Background(), slog.Level(level), C.GoString(message), "component", "macos")
 }

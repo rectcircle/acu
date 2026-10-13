@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Publish a verified draft release (existing tag, for example v0.1.4)
+        description: Publish only after the user explicitly authorizes the reviewed draft (for example v0.1.5)
         required: true
         type: string
 
@@ -92,6 +92,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          artifact_base="ACU-${RELEASE_TAG#v}-macos-universal"
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)
             if [ "$is_draft" != "true" ]; then
@@ -99,16 +100,20 @@ jobs:
               exit 1
             fi
             gh release upload "$RELEASE_TAG" \
-              build/ACU.tar.gz \
-              build/ACU.tar.gz.sha256 \
+              "build/$artifact_base.tar.gz" \
+              "build/$artifact_base.tar.gz.sha256" \
+              "build/$artifact_base.pkg" \
+              "build/$artifact_base.pkg.sha256" \
               --clobber
             gh release edit "$RELEASE_TAG" \
               --title "ACU $RELEASE_TAG" \
               --notes-file build/release-notes.md
           else
             gh release create "$RELEASE_TAG" \
-              build/ACU.tar.gz \
-              build/ACU.tar.gz.sha256 \
+              "build/$artifact_base.tar.gz" \
+              "build/$artifact_base.tar.gz.sha256" \
+              "build/$artifact_base.pkg" \
+              "build/$artifact_base.pkg.sha256" \
               --title "ACU $RELEASE_TAG" \
               --notes-file build/release-notes.md \
               --draft \
@@ -129,19 +134,30 @@ jobs:
 
       - name: Download and verify the reviewed release assets
         run: |
-          gh release view "$RELEASE_TAG"
-          gh release download "$RELEASE_TAG" --dir build \
-            --pattern ACU.tar.gz --pattern ACU.tar.gz.sha256
-          expected_sha=$(awk 'NR == 1 { print $1 }' build/ACU.tar.gz.sha256)
-          actual_sha=$(sha256sum build/ACU.tar.gz | awk '{ print $1 }')
-          if [ "$expected_sha" != "$actual_sha" ]; then
-            echo "::error::Release asset checksum mismatch."
+          is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)
+          if [ "$is_draft" != "true" ]; then
+            echo "::error::Only a reviewed draft release can be published."
             exit 1
           fi
+          artifact_base="ACU-${RELEASE_TAG#v}-macos-universal"
+          gh release download "$RELEASE_TAG" --dir build \
+            --pattern "$artifact_base.tar.gz" \
+            --pattern "$artifact_base.tar.gz.sha256" \
+            --pattern "$artifact_base.pkg" \
+            --pattern "$artifact_base.pkg.sha256"
+          for artifact in "$artifact_base.tar.gz" "$artifact_base.pkg"; do
+            expected_sha=$(awk 'NR == 1 { print $1 }' "build/$artifact.sha256")
+            actual_sha=$(sha256sum "build/$artifact" | awk '{ print $1 }')
+            if [ "$expected_sha" != "$actual_sha" ]; then
+              echo "::error::$artifact checksum mismatch."
+              exit 1
+            fi
+          done
 
       - name: Publish the release and update Homebrew cask
         run: |
-          sha256=$(awk 'NR == 1 { print $1 }' build/ACU.tar.gz.sha256)
+          archive="ACU-${RELEASE_TAG#v}-macos-universal.tar.gz"
+          sha256=$(awk 'NR == 1 { print $1 }' "build/$archive.sha256")
           git fetch origin main
           git checkout -B homebrew-update origin/main
           current_version=$(awk '/^  version / { gsub(/"/, "", $2); print $2 }' Casks/acu.rb)

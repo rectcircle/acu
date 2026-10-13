@@ -14,18 +14,32 @@ if ! printf '%s\n' "$VERSION" |
 fi
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-ARCHIVE="$ROOT/build/ACU.tar.gz"
+ARTIFACT_BASE="ACU-${VERSION}-macos-universal"
+ARCHIVE="$ROOT/build/$ARTIFACT_BASE.tar.gz"
+PACKAGE="$ROOT/build/$ARTIFACT_BASE.pkg"
+PACKAGE_TMP=$(mktemp -d "${TMPDIR:-/tmp}/acu-package.XXXXXX")
+trap 'rm -rf "$PACKAGE_TMP"' EXIT
+STAGED_APP="$PACKAGE_TMP/ACU.app"
 
 ACU_VERSION="$VERSION" \
   ACU_ARCHES="${ACU_ARCHES:-arm64 amd64}" \
   "$ROOT/scripts/build-app.sh"
 
-rm -f "$ARCHIVE" "$ARCHIVE.sha256"
-tar -czf "$ARCHIVE" -C "$ROOT/build" ACU.app
+rm -f "$ARCHIVE" "$ARCHIVE.sha256" "$PACKAGE" "$PACKAGE.sha256"
+ditto --norsrc "$ROOT/build/ACU.app" "$STAGED_APP"
+codesign --verify --deep --strict "$STAGED_APP"
+tar -czf "$ARCHIVE" -C "$PACKAGE_TMP" ACU.app
+pkgbuild \
+  --component "$STAGED_APP" \
+  --install-location /Applications \
+  --identifier github.com.rectcircle.acu \
+  --version "$VERSION" \
+  "$PACKAGE"
 
 (
   cd "$ROOT/build"
-  shasum -a 256 ACU.tar.gz >ACU.tar.gz.sha256
+  shasum -a 256 "$ARTIFACT_BASE.tar.gz" >"$ARTIFACT_BASE.tar.gz.sha256"
+  shasum -a 256 "$ARTIFACT_BASE.pkg" >"$ARTIFACT_BASE.pkg.sha256"
 )
 
-printf 'Packaged %s\n' "$ARCHIVE"
+printf 'Packaged %s and %s\n' "$ARCHIVE" "$PACKAGE"

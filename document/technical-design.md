@@ -515,7 +515,7 @@ LAContext *context = [LAContext new];
 ### 10.1 会话状态
 
 模拟锁屏期间，Guardian 订阅 `NSDistributedNotificationCenter` 的
-`com.apple.screenIsLocked` 通知，收到后立即清理模拟遮罩和输入拦截；每 30 秒使用
+`com.apple.screenIsLocked` 与 `com.apple.screenIsUnlocked` 通知，收到后立即清理模拟遮罩和输入拦截；解锁通知用于补偿遗漏的锁屏事件。每 30 秒使用
 `CGSessionCopyCurrentDictionary` 读取 `CGSSessionScreenIsLocked` 作为兜底：
 
 - 启动时若已锁定，拒绝开启。
@@ -852,3 +852,13 @@ SHA-256；安装后仅允许用户显式移除 ACU 自身的 quarantine，不得
 5. 使用双进程，让 Guardian 在 controller 故障后仍可认证退出。
 6. 企业策略检测只用于权限诊断，不弹窗、不阻断功能；不修改或规避 MDM 配置。
 7. 半合盖仅自动开启模拟保护，展开仅自动发起系统认证，不绕过认证。
+
+### 真实锁屏退出与日志
+
+Guardian 通过专用 `TransitionSystemLock` 从 protected、degraded 或 authenticating
+进入 disarming；普通未认证退出仍被状态机拒绝。认证在独立 goroutine 等待，结果由事件循环消费，
+避免阻塞真实锁屏处理。监听锁屏与解锁通知，解锁通知补偿休眠期间遗漏的锁屏事件；保留 30 秒轮询兜底。
+
+日志使用 Go slog JSON handler，原生诊断通过 C→Go 回调写入同一日志，包含时间、级别、角色、PID。
+`~/Library/Logs/ACU/acu.log` 按 5 MiB 轮转，保留三个备份；跨进程 flock 串行化写入和轮转。
+核心状态和生命周期记录 INFO，可恢复异常记录 WARN，启动失败、IPC 失败和致命故障记录 ERROR。

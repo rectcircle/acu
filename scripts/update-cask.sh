@@ -41,11 +41,16 @@ awk -v version="$VERSION" -v sha256="$SHA256" '
     checksums++
     next
   }
+  /^  url / {
+    print "  url \"https://github.com/rectcircle/acu/releases/download/v#{version}/ACU-" version "-macos-universal.tar.gz\""
+    urls++
+    next
+  }
   {
     print
   }
   END {
-    if (versions != 1 || checksums != 1) {
+    if (versions != 1 || checksums != 1 || urls > 1) {
       exit 1
     }
   }

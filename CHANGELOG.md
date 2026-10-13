@@ -5,6 +5,26 @@
 This file records notable changes to ACU. Every release includes both Chinese
 and English notes.
 
+## [0.1.5] - 2026-10-13
+
+### 修复
+
+- 修复真实锁屏时正常保护状态无法解除模拟锁屏的问题；认证等待不再阻塞锁屏处理，并通过系统解锁事件兜底清理。
+
+### 新增
+
+- 新增持久化分级结构化日志，覆盖 Controller、Guardian 和原生桥接关键链路，自动轮转日志文件。
+- 发布草稿新增 macOS 通用 `.pkg` 安装包及 SHA-256，统一版本化产物命名；正式发布须用户明确授权。
+
+### Fixed
+
+- Allow system-lock teardown from the protected state, process lock events during authentication, and use system unlock notifications to recover missed lock events.
+
+### Added
+
+- Add persistent structured logs with severity levels and rotation across Controller, Guardian, and the native bridge.
+- Include universal macOS installers and checksums in release drafts, with versioned artifact names and explicit user authorization before publication.
+
 ## [0.1.4] - 2026-10-13
 
 ### 变更

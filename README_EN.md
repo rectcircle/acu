@@ -29,6 +29,21 @@ brew install --cask rectcircle/acu/acu
 /usr/bin/xattr -dr com.apple.quarantine /Applications/ACU.app
 ```
 
+## Manual Installation
+
+Starting with the next release, download
+`ACU-<version>-macos-universal.pkg` from the
+[GitHub Releases page](https://github.com/rectcircle/acu/releases), then
+double-click it and follow the Installer prompts to install ACU in
+`/Applications`. Each release will also include the matching `.tar.gz` archive.
+The app uses an ad-hoc signature; the installer package is unsigned, and neither
+is notarized by Apple. If macOS blocks the installer or app, only allow it after
+verifying that you trust the release artifacts. You can remove the app's quarantine with:
+
+```sh
+/usr/bin/xattr -dr com.apple.quarantine /Applications/ACU.app
+```
+
 Upgrade to the latest version:
 
 ```sh
@@ -69,24 +84,26 @@ Requires macOS 15 or later, Go 1.22 or later, and Xcode Command Line Tools.
 open "build/ACU.app"
 ```
 
-Build a release archive that supports both Apple Silicon and Intel Macs:
+Build a release archive and macOS installer that support both Apple Silicon
+and Intel Macs:
 
 ```sh
 ./scripts/package-release.sh 0.1.3
 ```
 
-Pushing a tag such as `v0.1.4` runs tests, builds `ACU.tar.gz`, and creates a
-**draft release**. This does not publish the release or update Homebrew. Release
-notes come from the matching bilingual section in `CHANGELOG.md`; the build
-fails if that version is missing.
+Pushing a tag such as `v0.1.5` runs tests, builds
+`ACU-<version>-macos-universal.tar.gz`, `ACU-<version>-macos-universal.pkg`,
+their SHA-256 files, and creates a **draft release**. This does not publish the
+release or update Homebrew. Release notes come from the matching bilingual section in
+`CHANGELOG.md`; the build fails if that version is missing.
 
-After testing the draft's archive, open **Actions → Release → Run workflow**,
-select `main`, and enter its tag (for example, `v0.1.4`) in `version`. The workflow
-verifies the archive's SHA-256, publishes the reviewed assets without rebuilding,
-and updates the Homebrew Cask. Use this entry point to publish drafts so Homebrew
-is updated as well. Tag builds cannot replace public release assets; fixes need
-a new version tag. Publishing an older version does not downgrade the Cask or
-mark that release as latest.
+After the user downloads and verifies the draft's installer and archive, publish
+only with the user's explicit authorization. Then open **Actions → Release → Run
+workflow**, select `main`, and enter the tag (for example, `v0.1.5`) in `version`.
+The workflow verifies both SHA-256 values, publishes the reviewed assets without
+rebuilding, and updates the Homebrew Cask (which uses the `.tar.gz` archive). Tag builds
+cannot replace public release assets; fixes need a new version tag. Publishing
+an older version does not downgrade the Cask or mark that release as latest.
 
 On first use, grant ACU access under System Settings > Privacy & Security >
 Accessibility. This permission normally covers the event monitoring and
@@ -166,3 +183,7 @@ constraints.
 ## License
 
 [MIT License](LICENSE)
+
+## Logs
+
+ACU writes INFO, WARN, and ERROR JSON records to `~/Library/Logs/ACU/acu.log`. Controller, Guardian, and the native bridge share logs with timestamps, severity, process role, and PID. Files rotate at 5 MiB with three backups. Credentials and IPC tokens are not logged. Use `tail -f ~/Library/Logs/ACU/acu.log` to inspect session notifications, state transitions, and cleanup.

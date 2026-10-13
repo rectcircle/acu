@@ -66,3 +66,28 @@ func TestStateMachineKeepAwakeLifecycle(t *testing.T) {
 		}
 	}
 }
+
+func TestSystemLockDisarmsEveryProtectionState(t *testing.T) {
+	for _, state := range []State{StateProtected, StateDegraded, StateAuthenticating} {
+		t.Run(string(state), func(t *testing.T) {
+			machine := NewStateMachine(state)
+			if err := machine.TransitionSystemLock(); err != nil {
+				t.Fatal(err)
+			}
+			if err := machine.Transition(StateDisabled); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+func TestSystemLockRejectsInactiveStates(t *testing.T) {
+	for _, state := range []State{StateDisabled, StateArming, StateAwake, StateDisarming, StateFailed} {
+		machine := NewStateMachine(state)
+		if !errors.Is(machine.TransitionSystemLock(), ErrInvalidTransition) {
+			t.Fatalf("accepted %s", state)
+		}
+		if machine.State() != state {
+			t.Fatalf("changed %s", state)
+		}
+	}
+}

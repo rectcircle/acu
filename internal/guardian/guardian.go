@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -38,7 +39,13 @@ const (
 	commandActivity
 )
 
-func Run(conn *ipc.Conn, cfg config.Config) error {
+func Run(conn *ipc.Conn, cfg config.Config) (runErr error) {
+	defer func() {
+		if runErr != nil {
+			slog.Error("guardian failed", "error", runErr)
+		}
+	}()
+	slog.Info("guardian starting")
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -75,9 +82,14 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 	var cleanupOnce sync.Once
 	cleanup := func() {
 		cleanupOnce.Do(func() {
+			slog.Info("protection cleanup started")
 			for attempt := 0; attempt < restoreAttempts; attempt++ {
 				if macos.RestorePowerSettings() {
 					break
+				}
+				slog.Warn("brightness restoration failed", "attempt", attempt+1)
+				if attempt+1 == restoreAttempts {
+					slog.Error("brightness restoration retries exhausted")
 				}
 				if attempt+1 < restoreAttempts {
 					time.Sleep(restoreRetryDelay)
@@ -85,6 +97,7 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 			}
 			macos.StopInputGuard()
 			macos.HideShields()
+			slog.Info("protection cleanup completed")
 		})
 	}
 	defer cleanup()
@@ -129,12 +142,23 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 		lastActivity := time.Now()
 		powerSaved := false
 		systemLocked := false
+		type authenticationResult struct {
+			authenticated bool
+			err           error
+		}
+		authResults := make(chan authenticationResult, 1)
+		previous := StateProtected
 		// 省电恢复：有物理操作 → 立即恢复显示器亮度。
 		// 事件经 channel 投递至本 goroutine 后恢复，RestorePowerSettings 为轻量 IOKit 调用
 		// 且幂等（gBrightnessSaved 哨兵 + C 侧 mutex），不会阻塞主循环。
 		restoreIfActive := func() {
 			if powerSaved {
 				powerSaved = !macos.RestorePowerSettings()
+				if powerSaved {
+					slog.Warn("display brightness restore failed")
+				} else {
+					slog.Info("display brightness restored")
+				}
 			}
 		}
 		disarmForSystemLock := func() bool {
@@ -143,7 +167,8 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 				state != StateAuthenticating {
 				return false
 			}
-			if err := machine.Transition(StateDisarming); err != nil {
+			if err := machine.TransitionSystemLock(); err != nil {
+				slog.Error("system lock teardown rejected", "error", err)
 				return false
 			}
 			writeState(conn, StateDisarming)
@@ -183,7 +208,7 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 				if state != StateProtected && state != StateDegraded {
 					continue
 				}
-				previous := state
+				previous = state
 				if err := machine.Transition(StateAuthenticating); err != nil {
 					continue
 				}
@@ -191,8 +216,20 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 				macos.SetInputAuthenticationMode(true)
 				macos.SetShieldAuthenticationMode(true)
 
-				authenticated, authErr := macos.Authenticate()
-				if authErr == nil && authenticated {
+				slog.Info("authentication started")
+				go func() {
+					authenticated, err := macos.Authenticate()
+					authResults <- authenticationResult{authenticated, err}
+				}()
+			case result := <-authResults:
+				if machine.State() != StateAuthenticating {
+					continue
+				}
+				slog.Info("authentication completed", "authenticated", result.authenticated)
+				if result.err != nil {
+					slog.Warn("authentication failed", "error", result.err)
+				}
+				if result.err == nil && result.authenticated {
 					_ = machine.Transition(StateDisarming)
 					writeState(conn, StateDisarming)
 					ticker.Stop()
@@ -213,12 +250,14 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 					writeState(conn, StateProtected)
 				}
 			case <-macos.TapDegradedEvents():
+				slog.Warn("input guard degraded")
 				if machine.State() == StateProtected {
 					_ = machine.Transition(StateDegraded)
 					writeState(conn, StateDegraded)
 					macos.ShowInputGuardFailure()
 				}
-			case <-macos.SessionLockEvents():
+			case source := <-macos.SessionLockEvents():
+				slog.Info("system session event received", "source", source)
 				// Distributed notifications provide the fast path. Remember the
 				// state to suppress cursor nudges while teardown is starting.
 				systemLocked = true
@@ -231,7 +270,9 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 					machine.State() != StateAuthenticating {
 					continue
 				}
-				if !macos.SessionLocked() {
+				locked := macos.SessionLocked()
+				slog.Info("system lock fallback checked", "locked", locked)
+				if !locked {
 					continue
 				}
 				systemLocked = true
@@ -246,6 +287,11 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 					!powerSaved &&
 					time.Since(lastActivity) >= idleTimeout {
 					powerSaved = macos.SavePowerSettings()
+					if powerSaved {
+						slog.Info("displays dimmed")
+					} else {
+						slog.Warn("display dimming unavailable")
+					}
 					if machine.State() != StateProtected {
 						powerSaved = !macos.RestorePowerSettings()
 					}
@@ -262,6 +308,7 @@ func Run(conn *ipc.Conn, cfg config.Config) error {
 					cfg.RestoreDelay,
 					marker,
 				); err != nil {
+					slog.Warn("cursor activity failed", "error", err)
 					failures++
 					if failures >= cfg.FailureThreshold {
 						_ = machine.Transition(StateDegraded)
@@ -317,6 +364,7 @@ func runKeepAwake(conn *ipc.Conn, cfg config.Config) error {
 					cfg.RestoreDelay,
 					marker,
 				); err != nil {
+					slog.Warn("cursor activity failed", "error", err)
 					failures++
 					if failures >= cfg.FailureThreshold &&
 						machine.State() != StateDegraded {
@@ -363,6 +411,9 @@ func readCommands(conn *ipc.Conn, commands chan<- command) {
 	for {
 		message, err := conn.Read()
 		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				slog.Error("guardian IPC read failed", "error", err)
+			}
 			if errors.Is(err, io.EOF) {
 				return
 			}
@@ -390,7 +441,9 @@ func enqueueCommand(commands chan<- command, next command) {
 }
 
 func writeState(conn *ipc.Conn, state State) {
-	_ = conn.Write(ipc.Message{Type: messageState, State: string(state)})
+	if err := conn.Write(ipc.Message{Type: messageState, State: string(state)}); err != nil {
+		slog.Error("guardian state delivery failed", "state", state, "error", err)
+	}
 }
 
 func randomMarker() (uint64, error) {

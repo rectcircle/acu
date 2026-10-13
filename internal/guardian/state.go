@@ -3,6 +3,7 @@ package guardian
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 )
 
@@ -44,10 +45,27 @@ func (m *StateMachine) Transition(next State) error {
 		return nil
 	}
 	if !canTransition(m.state, next) {
+		slog.Warn("state transition rejected", "from", m.state, "to", next)
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, m.state, next)
 	}
+	slog.Info("guardian state changed", "from", m.state, "to", next)
 	m.state = next
 	return nil
+}
+
+// TransitionSystemLock permits teardown without ACU authentication because macOS
+// has already taken responsibility for protecting the session.
+func (m *StateMachine) TransitionSystemLock() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	switch m.state {
+	case StateProtected, StateAuthenticating, StateDegraded:
+		slog.Info("guardian system lock teardown", "from", m.state)
+		m.state = StateDisarming
+		return nil
+	default:
+		return fmt.Errorf("%w: system lock from %s", ErrInvalidTransition, m.state)
+	}
 }
 
 func (m *StateMachine) TransitionTestTimeout() error {

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"os/exec"
@@ -52,7 +53,13 @@ type Controller struct {
 	bluetoothDisconnectDebouncing   bool
 }
 
-func Run() error {
+func Run() (runErr error) {
+	defer func() {
+		if runErr != nil {
+			slog.Error("controller failed", "error", runErr)
+		}
+	}()
+	slog.Info("controller initializing")
 	if err := macos.InitMenu(); err != nil {
 		return err
 	}
@@ -98,6 +105,7 @@ func (c *Controller) loop() {
 	for {
 		select {
 		case action := <-macos.MenuEvents():
+			slog.Info("menu action received", "action", action)
 			switch action {
 			case macos.MenuEnable:
 				c.enable(0)
@@ -204,6 +212,7 @@ func (c *Controller) observeBluetoothConnection(
 		(c.child != nil && c.child.mode == guardianModeProtection)
 	switch c.bluetoothPresence.observe(now, connected, protectionActive) {
 	case bluetoothPresenceProtect:
+		slog.Info("bluetooth departure triggered protection")
 		if !macos.SessionLocked() {
 			c.enable(0)
 		}
@@ -289,7 +298,9 @@ func (c *Controller) pollLidAutomation(now time.Time) {
 		angleMoved := !c.lidAutomation.angleKnown ||
 			math.Abs(angle-c.lidAutomation.lastAngle) >= lidMovementThreshold
 		if angleMoved {
-			_ = c.child.conn.Write(ipc.Message{Type: "activity"})
+			if err := c.child.conn.Write(ipc.Message{Type: "activity"}); err != nil {
+				slog.Warn("lid activity delivery failed", "error", err)
+			}
 		}
 	}
 
@@ -301,17 +312,20 @@ func (c *Controller) pollLidAutomation(now time.Time) {
 		protectionActive,
 	) {
 	case lidActionProtect:
+		slog.Info("lid automation triggered protection")
 		c.enable(0)
 		if c.child == nil && !c.pendingProtection {
 			c.lidAutomation.protectionFailed()
 		}
 	case lidActionAuthenticate:
+		slog.Info("lid automation requested authentication")
 		c.requestAuthentication()
 	}
 }
 
 func (c *Controller) checkLidAutomationPreflight() {
 	if failures := macos.Preflight(true); failures != 0 {
+		slog.Warn("protection preflight failed", "failures", uint32(failures))
 		macos.ShowPreflightAlert(
 			text("alert.lid_automation_not_ready.title"),
 			preflightMessage(failures),
@@ -330,6 +344,7 @@ func (c *Controller) enable(timeoutSeconds int) {
 	macos.SetMenuState(text("state.preflighting"))
 
 	if failures := macos.Preflight(true); failures != 0 {
+		slog.Warn("protection preflight failed", "failures", uint32(failures))
 		macos.SetMenuState(text("state.start_failed"))
 		macos.ShowPreflightAlert(
 			text("alert.protection_enable_failed.title"),
@@ -347,6 +362,7 @@ func (c *Controller) upgradeToProtection(timeoutSeconds int) {
 	}
 	macos.SetMenuState(text("state.preflighting_protection"))
 	if failures := macos.Preflight(true); failures != 0 {
+		slog.Warn("protection preflight failed", "failures", uint32(failures))
 		macos.SetMenuState(text("state.keep_awake_active"))
 		macos.ShowPreflightAlert(
 			text("alert.protection_enable_failed.title"),
@@ -360,6 +376,7 @@ func (c *Controller) upgradeToProtection(timeoutSeconds int) {
 	c.pendingProtectionTimeout = timeoutSeconds
 	macos.SetMenuState(text("state.switching_to_protection"))
 	if err := c.child.conn.Write(ipc.Message{Type: "stop"}); err != nil {
+		slog.Error("guardian stop delivery failed", "error", err)
 		c.pendingProtection = false
 		c.pendingProtectionTimeout = 0
 		macos.SetMenuState(text("state.keep_awake_active"))
@@ -372,12 +389,14 @@ func (c *Controller) upgradeToProtection(timeoutSeconds int) {
 }
 
 func (c *Controller) startProtection(timeoutSeconds int) {
+	slog.Info("protection requested", "timeout_seconds", timeoutSeconds)
 	child, err := startGuardian(
 		c.childEvents,
 		guardianModeProtection,
 		timeoutSeconds,
 	)
 	if err != nil {
+		slog.Error("guardian launch failed", "error", err)
 		macos.SetMenuState(text("state.start_failed"))
 		macos.ShowAlert(
 			text("alert.guardian_start_failed.title"),
@@ -410,6 +429,7 @@ func (c *Controller) toggleKeepAwake() {
 		}
 		macos.SetMenuState(text("state.stopping_keep_awake"))
 		if err := c.child.conn.Write(ipc.Message{Type: "stop"}); err != nil {
+			slog.Error("guardian stop delivery failed", "error", err)
 			macos.SetMenuState(text("state.stop_keep_awake_failed"))
 		} else {
 			c.keepAwakeRequested = false
@@ -420,6 +440,7 @@ func (c *Controller) toggleKeepAwake() {
 
 	macos.SetMenuState(text("state.preflighting_keep_awake"))
 	if failures := macos.PreflightKeepAwake(true); failures != 0 {
+		slog.Warn("keep awake preflight failed", "failures", uint32(failures))
 		macos.SetMenuState(text("state.start_failed"))
 		macos.ShowPreflightAlert(
 			text("alert.keep_awake_enable_failed.title"),
@@ -435,6 +456,7 @@ func (c *Controller) toggleKeepAwake() {
 		0,
 	)
 	if err != nil {
+		slog.Error("guardian launch failed", "error", err)
 		macos.SetMenuState(text("state.start_failed"))
 		macos.ShowAlert(
 			text("alert.keep_awake_process_start_failed.title"),
@@ -453,10 +475,14 @@ func (c *Controller) requestAuthentication() {
 	if c.child == nil || c.child.mode != guardianModeProtection {
 		return
 	}
-	_ = c.child.conn.Write(ipc.Message{Type: "request_auth"})
+	slog.Info("authentication requested")
+	if err := c.child.conn.Write(ipc.Message{Type: "request_auth"}); err != nil {
+		slog.Error("authentication request delivery failed", "error", err)
+	}
 }
 
 func (c *Controller) quit() {
+	slog.Info("quit requested")
 	c.keepAwakeRequested = false
 	if c.child == nil {
 		macos.StopApp()
@@ -503,6 +529,11 @@ func (c *Controller) handleChildEvent(event childEvent) {
 		return
 	}
 	if event.exited {
+		if event.err != nil {
+			slog.Error("guardian exited abnormally", "error", event.err)
+		} else {
+			slog.Info("guardian exited")
+		}
 		c.child = nil
 		if event.child.mode == guardianModeProtection {
 			c.lidAutomation.protectionStopped()
@@ -543,6 +574,7 @@ func (c *Controller) handleChildEvent(event childEvent) {
 
 	switch event.message.Type {
 	case "state":
+		slog.Info("guardian state received", "state", event.message.State)
 		if event.message.State == "awake" {
 			macos.SetKeepAwakeActive(true)
 			macos.SetMenuState(text("state.keep_awake_active"))
@@ -575,6 +607,7 @@ func (c *Controller) handleChildEvent(event childEvent) {
 			}
 		}
 	case "fatal":
+		slog.Error("guardian reported fatal error", "code", event.message.Code)
 		event.child.fatalReported = true
 		macos.SetMenuState(text("state.start_failed"))
 		macos.ShowAlert(
@@ -630,7 +663,13 @@ func startGuardian(
 	events chan<- childEvent,
 	mode guardianMode,
 	timeoutSeconds int,
-) (*guardianProcess, error) {
+) (process *guardianProcess, startErr error) {
+	defer func() {
+		if startErr != nil {
+			slog.Error("guardian launch failed", "mode", mode, "error", startErr)
+		}
+	}()
+	slog.Info("guardian launch requested", "mode", mode)
 	executable, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -656,6 +695,7 @@ func startGuardian(
 		controllerWrite.Close()
 		return nil, err
 	}
+	slog.Info("guardian launched", "child_pid", command.Process.Pid, "mode", mode)
 	guardianRead.Close()
 	guardianWrite.Close()
 

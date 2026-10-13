@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"runtime"
 
@@ -9,11 +10,22 @@ import (
 	"github.com/rectcircle/acu/internal/config"
 	"github.com/rectcircle/acu/internal/guardian"
 	"github.com/rectcircle/acu/internal/ipc"
+	"github.com/rectcircle/acu/internal/logging"
 )
 
 func main() {
 	runtime.LockOSThread()
 
+	role := "controller"
+	if len(os.Args) == 2 && os.Args[1] == "guardian" {
+		role = "guardian"
+	}
+	closeLogs, logErr := logging.Init(role)
+	defer closeLogs()
+	if logErr != nil {
+		slog.Warn("persistent logging unavailable", "error", logErr)
+	}
+	slog.Info("process started")
 	var err error
 	if len(os.Args) == 2 && os.Args[1] == "guardian" {
 		err = runGuardian()
@@ -21,9 +33,10 @@ func main() {
 		err = app.Run()
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "acu:", err)
+		slog.Error("process failed", "error", err)
 		os.Exit(1)
 	}
+	slog.Info("process stopped")
 }
 
 func runGuardian() error {

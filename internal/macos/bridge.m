@@ -17,8 +17,20 @@
 #import <pthread.h>
 #import <stdatomic.h>
 #import <stdio.h>
+#import <stdarg.h>
 #import <string.h>
 #import <unistd.h>
+
+static void acu_log_warning(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    char *message = NULL;
+    if (vasprintf(&message, format, args) >= 0 && message != NULL) {
+        acuLog(4, message);
+        free(message);
+    }
+    va_end(args);
+}
 
 static NSStatusItem *gStatusItem;
 static NSMenuItem *gStateItem;
@@ -115,8 +127,7 @@ static id gBluetoothDisconnectObserver;
 
 @implementation ACUSessionLockObserver
 - (void)screenDidLock:(NSNotification *)notification {
-    (void)notification;
-    acuSessionLockEvent();
+    acuSessionLockEvent((char *)notification.name.UTF8String);
 }
 @end
 
@@ -131,6 +142,14 @@ static void start_session_lock_observer(void) {
                name:@"com.apple.screenIsLocked"
              object:nil
   suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
+    // An unlock event also proves a real lock cycle occurred, even when the
+    // lock notification was missed while the machine slept.
+    [[NSDistributedNotificationCenter defaultCenter]
+        addObserver:gSessionLockObserver selector:@selector(screenDidLock:)
+        name:@"com.apple.screenIsUnlocked" object:nil
+        suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
+    acuLog(0, "session lock and unlock observers registered");
+
 }
 
 static void stop_session_lock_observer(void) {
@@ -140,6 +159,7 @@ static void stop_session_lock_observer(void) {
     [[NSDistributedNotificationCenter defaultCenter]
         removeObserver:gSessionLockObserver];
     gSessionLockObserver = nil;
+    acuLog(0, "session observers removed");
 }
 
 @interface ACUBluetoothConnectionDelegate : NSObject
@@ -592,7 +612,7 @@ static void update_launch_at_login_menu(void) {
 }
 
 static void show_launch_at_login_error(NSString *action, NSError *error) {
-    NSLog(@"ACU: %@ login item failed: %@", action, error);
+    acuLog(8, (char *)[NSString stringWithFormat:@"%@ login item failed: %@", action, error].UTF8String);
     NSAlert *alert = [NSAlert new];
     alert.messageText = localized(@"alert.login_item.title");
     alert.informativeText =
@@ -1955,7 +1975,7 @@ static NSURL *extension_remote_video_url(NSString *provider,
                                               options:0
                                                 error:nil];
     if (![manifest isKindOfClass:[NSDictionary class]]) {
-        fprintf(stderr,
+        acu_log_warning(
                 "acu: dynamic lock background provider %s has no "
                 "supported manifest\n",
                 provider.UTF8String ?: "(unknown)");
@@ -2235,7 +2255,7 @@ static void download_lock_screen_video(NSURL *remoteURL) {
           } else {
               const char *message =
                   fileError.localizedDescription.UTF8String;
-              fprintf(stderr,
+              acu_log_warning(
                       "acu: download lock screen video failed: %s\n",
                       message != NULL ? message : "unknown error");
           }
@@ -2359,7 +2379,7 @@ static NSPanel *create_shield(NSScreen *screen) {
                        ? systemVideoURL
                        : cached_lock_screen_video_url(remoteVideoURL);
         if (videoURL == nil && remoteVideoURL == nil && posterURL == nil) {
-            fprintf(stderr,
+            acu_log_warning(
                     "acu: selected system background unavailable; "
                     "using black background\n");
         }
@@ -2599,7 +2619,9 @@ int acu_authenticate(void) {
         [context evaluatePolicy:LAPolicyDeviceOwnerAuthentication
                 localizedReason:localized(@"auth.reason")
                           reply:^(BOOL authenticated, NSError *replyError) {
-                            (void)replyError;
+                            if (replyError != nil) {
+                                acuLog(4, (char *)[NSString stringWithFormat:@"authentication unsuccessful: %@", replyError].UTF8String);
+                            }
                             success = authenticated;
                             dispatch_semaphore_signal(done);
                           }];
@@ -2702,7 +2724,7 @@ int acu_save_power_settings(void) {
     CGError listResult =
         CGGetOnlineDisplayList(ACU_MAX_DISPLAYS, displays, &displayCount);
     if (listResult != kCGErrorSuccess) {
-        fprintf(stderr,
+        acu_log_warning(
                 "acu: list displays for dimming failed: %d\n",
                 listResult);
         return 0;
@@ -2736,8 +2758,7 @@ int acu_save_power_settings(void) {
                 if (writeResult == kIOReturnSuccess) {
                     backend = ACUBrightnessBackendDisplayServicesLinear;
                 } else {
-                    fprintf(
-                        stderr,
+                    acu_log_warning(
                         "acu: dim display 0x%x failed: %d\n",
                         displays[i],
                         writeResult);
@@ -2759,8 +2780,7 @@ int acu_save_power_settings(void) {
                     if (writeResult == kIOReturnSuccess) {
                         backend = ACUBrightnessBackendIODisplay;
                     } else {
-                        fprintf(
-                            stderr,
+                        acu_log_warning(
                             "acu: dim display 0x%x via IODisplay "
                             "failed: %d\n",
                             displays[i],
@@ -2826,7 +2846,7 @@ int acu_restore_power_settings(void) {
             }
         }
         if (result != kIOReturnSuccess) {
-            fprintf(stderr,
+            acu_log_warning(
                     "acu: restore display 0x%x brightness failed: %d\n",
                     gDisplayBrightness[i].display,
                     result);
