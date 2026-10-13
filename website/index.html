@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#090e13" />
+    <title>ACU — 你休息，Agent 继续。</title>
+    <meta
+      name="description"
+      content="为操作电脑的 AI Agent 与 UI 自动化维护空闲活动，并提供全屏模拟锁屏、物理输入隔离和原生身份认证。"
+    />
+    <link rel="canonical" href="https://acu.rectcircle.cn/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:title" content="ACU — 你休息，Agent 继续。" />
+    <meta
+      property="og:description"
+      content="让 Agent 继续工作，让离开多一层保护。"
+    />
+    <meta property="og:url" content="https://acu.rectcircle.cn/" />
+    <meta
+      property="og:image"
+      content="https://acu.rectcircle.cn/assets/acu-icon.png"
+    />
+    <link rel="icon" href="/assets/acu-icon.png" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" type="module"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main" data-i18n="skip">跳到正文</a>
+    <div class="ambient" aria-hidden="true"></div>
+    <header class="header wrap">
+      <a class="brand" href="#"
+        ><img src="/assets/acu-icon.png" width="36" height="36" alt="" /><span
+          >ACU</span
+        ></a
+      >
+      <nav data-i18n-aria="navLabel" aria-label="主导航">
+        <a href="#workflow" data-i18n="navWork">工作方式</a
+        ><a href="#sleep" data-i18n="navSleep">睡前</a
+        ><a href="#leave" data-i18n="navLeave">离开</a
+        ><a href="#install" data-i18n="navInstall">安装</a>
+      </nav>
+      <div class="header-tools">
+        <div
+          class="language-switch"
+          role="group"
+          data-i18n-aria="language"
+          aria-label="切换语言"
+        >
+          <button type="button" data-language="zh" aria-pressed="true">
+            中文</button
+          ><span aria-hidden="true">/</span
+          ><button type="button" data-language="en" aria-pressed="false">
+            EN
+          </button>
+        </div>
+        <a
+          class="github"
+          href="https://github.com/rectcircle/acu"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="GitHub"
+          >GitHub ↗</a
+        >
+      </div>
+    </header>
+    <main id="main">
+      <section class="hero wrap">
+        <div class="hero-copy">
+          <h1>
+            <span data-i18n="heroA">你休息，</span><br /><span
+              class="accent"
+              data-i18n="heroB"
+              >Agent 继续。</span
+            >
+          </h1>
+          <p class="intro" data-i18n="heroCopy">
+            为操作电脑的 AI Agent 与 UI
+            自动化，减少空闲系统锁屏造成的中断。需要时，遮挡屏幕、隔离物理输入，让工作继续，也让离开多一层保护。
+          </p>
+          <div class="actions">
+            <a class="button primary" href="#install"
+              ><span data-i18n="install">安装 ACU</span
+              ><span aria-hidden="true">↗</span></a
+            ><a class="button secondary" href="#workflow"
+              ><span data-i18n="explore">探索工作方式</span
+              ><span aria-hidden="true">↓</span></a
+            >
+          </div>
+          <p class="compatibility" data-i18n="compatibility">
+            macOS 15+ · Apple Silicon &amp; Intel · MIT 开源
+          </p>
+        </div>
+        <div class="hero-visual" data-mode="awake">
+          <div class="scene-grid" aria-hidden="true"></div>
+          <div class="agent-trace">
+            <div class="trace-header">
+              <span class="activity-dot" aria-hidden="true"></span
+              ><span data-i18n="agentRunning">Agent 正在工作</span
+              ><button
+                class="motion-control"
+                type="button"
+                data-i18n-aria="pause"
+                aria-label="暂停动效"
+              >
+                Ⅱ
+              </button>
+            </div>
+            <div class="trace-rows">
+              <div class="trace-row is-active">
+                <span class="trace-number">01</span>
+                <div>
+                  <code>observe()</code
+                  ><span data-i18n="traceObserve">观察界面</span>
+                </div>
+                <span class="trace-light" aria-hidden="true"></span>
+              </div>
+              <div class="trace-row">
+                <span class="trace-number">02</span>
+                <div>
+                  <code>click(target)</code
+                  ><span data-i18n="traceClick">操作目标</span>
+                </div>
+                <span class="trace-light" aria-hidden="true"></span>
+              </div>
+              <div class="trace-row">
+                <span class="trace-number">03</span>
+                <div>
+                  <code>type(content)</code
+                  ><span data-i18n="traceType">输入内容</span>
+                </div>
+                <span class="trace-light" aria-hidden="true"></span>
+              </div>
+            </div>
+            <div class="trace-footer">
+              <span class="trace-pulse" aria-hidden="true"></span
+              ><span data-i18n="traceNext">继续下一个任务</span>
+            </div>
+          </div>
+          <div class="hero-display">
+            <div class="menu-bar" aria-hidden="true">
+              <div class="menu-bar-left">
+                <svg class="menu-apple" viewBox="0 0 24 24">
+                  <path
+                    d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"
+                  />
+                </svg>
+                <span class="menu-bar-app">Finder</span>
+              </div>
+              <div class="menu-bar-right">
+                <span class="menu-acu" title="ACU"
+                  ><img
+                    src="/assets/acu-icon.png"
+                    width="14"
+                    height="14"
+                    alt=""
+                /></span>
+                <svg class="menu-glyph menu-wifi" viewBox="0 0 24 24">
+                  <path
+                    d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"
+                  />
+                </svg>
+                <svg class="menu-glyph menu-battery" viewBox="0 0 24 24">
+                  <path
+                    d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"
+                  />
+                </svg>
+                <span class="menu-bar-time">09:41</span>
+              </div>
+            </div>
+            <div class="desktop-demo" aria-hidden="true">
+              <div class="desktop-line"></div>
+              <div class="desktop-line"></div>
+              <div class="desktop-line"></div>
+              <div class="demo-pointer">↖</div>
+              <span data-i18n="desktopCaption">桌面仍可操作</span>
+            </div>
+            <img
+              class="native-shield"
+              src="/assets/shield-zh.png?v=2"
+              data-shield
+              data-i18n-alt="shieldAlt"
+              alt="ACU 原生模拟锁屏保护界面预览"
+              width="1920"
+              height="1200"
+            />
+          </div>
+          <div
+            class="hero-mode mode-control"
+            role="group"
+            data-i18n-aria="modeLabel"
+          >
+            <button
+              type="button"
+              data-mode="awake"
+              aria-pressed="true"
+              data-i18n="awake"
+            >
+              仅阻止系统锁屏</button
+            ><button
+              type="button"
+              data-mode="protected"
+              aria-pressed="false"
+              data-i18n="simulated"
+            >
+              模拟锁屏
+            </button>
+          </div>
+          <p class="visual-caption" data-i18n="previewCaption">
+            网页动效演示 · 保护画面由原生产品代码渲染
+          </p>
+        </div>
+        <div class="capability-strip">
+          <span
+            ><i aria-hidden="true">◌</i
+            ><span data-i18n="capabilityA">空闲活动维护</span></span
+          ><span
+            ><i aria-hidden="true">▣</i
+            ><span data-i18n="capabilityB">全屏内容遮挡</span></span
+          ><span
+            ><i aria-hidden="true">⌘</i
+            ><span data-i18n="capabilityC">物理输入隔离</span></span
+          ><span
+            ><i aria-hidden="true">↗</i
+            ><span data-i18n="capabilityD">合成输入放行</span></span
+          >
+        </div>
+      </section>
+
+      <section id="workflow" class="section workflow wrap reveal">
+        <div class="section-heading">
+          <h2>
+            <span data-i18n="workA">两种模式，</span><br /><span
+              class="accent"
+              data-i18n="workB"
+              >一个持续工作的 Agent。</span
+            >
+          </h2>
+          <p data-i18n="workCopy">
+            只想减少空闲锁屏中断，或需要离开时的基础保护。ACU
+            常驻菜单栏，不修改你的 Agent 客户端。
+          </p>
+        </div>
+        <div class="workflow-layout">
+          <div class="mode-explanations">
+            <button
+              type="button"
+              data-mode="awake"
+              aria-pressed="false"
+              class="mode-explanation"
+            >
+              <span class="mode-number">01</span>
+              <div>
+                <h3 data-i18n="awakeTitle">保持活动，桌面照常可用。</h3>
+                <p data-i18n="awakeCopy">
+                  空闲时轻微移动并恢复鼠标，降低自动锁屏概率。不显示遮罩、不拦截输入，随时可以停止。
+                </p>
+              </div>
+              <span class="mode-arrow" aria-hidden="true">↗</span></button
+            ><button
+              type="button"
+              data-mode="protected"
+              aria-pressed="true"
+              class="mode-explanation"
+            >
+              <span class="mode-number">02</span>
+              <div>
+                <h3 data-i18n="protectedTitle">遮住屏幕，放行软件合成输入。</h3>
+                <p data-i18n="protectedCopy">
+                  保护层覆盖所有显示器与 Space，拦截物理键鼠输入。按 Enter
+                  后，通过 Touch ID 或系统密码认证解除保护。
+                </p>
+              </div>
+              <span class="mode-arrow" aria-hidden="true">↗</span>
+            </button>
+            <p class="boundary-inline" data-i18n="modeBoundary">
+              应用层模拟锁屏，用于防窥与防误操作；不替代 macOS 系统锁屏。
+            </p>
+          </div>
+          <figure class="real-menu">
+            <button
+              type="button"
+              data-screenshot="menu"
+              data-i18n-aria="menuLink"
+            >
+              <img
+                src="/assets/menu-zh.png"
+                data-menu
+                width="612"
+                height="544"
+                data-i18n-alt="menuAlt"
+                alt="ACU 真实中文主菜单"
+                loading="lazy"
+              /><span class="image-expand" aria-hidden="true">↗</span>
+            </button>
+            <figcaption data-i18n="menuCaption">
+              用户实拍 · 中文界面 · v0.1.5
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="sleep" class="section story-section wrap reveal">
+        <div class="story-copy">
+          <h2>
+            <span data-i18n="sleepA">半合上屏幕，</span><br /><span
+              class="accent"
+              data-i18n="sleepB"
+              >把工作留给 AI。</span
+            >
+          </h2>
+          <p data-i18n="sleepCopy">
+            睡前把任务交给 Agent，再轻轻压低屏幕。角度低于设定阈值并稳定停留 2
+            秒后，ACU 自动开启模拟锁屏。
+          </p>
+          <p class="small-note" data-i18n="sleepNote">
+            需要带兼容铰链角度传感器的
+            MacBook。重新展开时发起原生认证；完全合盖可能使电脑休眠。
+          </p>
+          <button class="text-button" type="button" data-screenshot="lid">
+            <span data-i18n="lidMenuLink">查看真实角度设置</span
+            ><span aria-hidden="true">↗</span>
+          </button>
+        </div>
+        <div class="lid-demo" data-state="open">
+          <div class="laptop-stage">
+            <div class="laptop-halo" aria-hidden="true"></div>
+            <div class="laptop">
+              <div class="laptop-screen">
+                <div class="lid-desktop" aria-hidden="true">
+                  <div class="lid-menubar">
+                    <span class="lid-menubar-left"><i></i><i></i><i></i></span>
+                    <span class="lid-menubar-right"><i></i><i></i></span>
+                  </div>
+                  <div class="lid-window">
+                    <span class="activity-dot" aria-hidden="true"></span
+                    ><code>Agent working…</code>
+                    <div class="task-stream" aria-hidden="true">
+                      <i></i><i></i><i></i>
+                    </div>
+                  </div>
+                  <span class="lid-pointer" aria-hidden="true">↖</span>
+                </div>
+                <img
+                  src="/assets/shield-zh.png?v=2"
+                  width="1920"
+                  height="1200"
+                  data-shield
+                  data-i18n-alt="shieldAlt"
+                  alt="ACU 保护界面预览"
+                  loading="lazy"
+                />
+                <button
+                  type="button"
+                  class="lid-lock"
+                  id="lid-unlock"
+                  data-i18n-aria="lidUnlock"
+                >
+                  <svg
+                    class="lid-fingerprint"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 4.4A7.6 7.6 0 0 0 4.4 12c0 1.1.2 2.1.6 3" />
+                    <path d="M12 1.8c2.9 0 5.5 1.3 7.2 3.3" />
+                    <path d="M21.7 10a9.9 9.9 0 0 0-4.5-6" />
+                    <path d="M2.6 13.6A9.4 9.4 0 0 1 12 6.4c1.2 0 2.4.2 3.4.7" />
+                    <path d="M7 12a5 5 0 0 1 10 0c0 1.6-.2 3 .2 4.6" />
+                    <path d="M9.4 15.2a2.6 2.6 0 0 1 5.2 0c0 2-.3 3.4.3 5" />
+                    <path d="M6 17.2c.6 1.1.6 2.2 0 3.2" />
+                    <path d="M18.6 17.6c-.5 1.3-.4 2.4.2 3.3" />
+                  </svg>
+                  <span class="lid-lock-title" data-i18n="lidUnlock"
+                    >使用触摸 ID 或 密码解锁</span
+                  >
+                  <span class="lid-lock-hint" data-i18n="lidUnlockHint"
+                    >点击体验解锁过程</span
+                  >
+                </button>
+              </div>
+              <div class="laptop-base" aria-hidden="true">
+                <div class="keyboard"></div>
+                <div class="trackpad"></div>
+              </div>
+            </div>
+            <div class="angle-readout" aria-hidden="true">100°</div>
+          </div>
+          <div class="lid-controls">
+            <div class="demo-control-heading">
+              <span data-i18n="lidControl">拖动屏幕角度，体验触发过程</span
+              ><button type="button" class="replay text-button" id="lid-replay">
+                <span aria-hidden="true">↻</span
+                ><span data-i18n="replay">重新演示</span>
+              </button>
+            </div>
+            <label class="range-label" for="lid-angle"
+              ><span data-i18n="angle">屏幕角度</span
+              ><output id="angle-output" for="lid-angle">100°</output></label
+            ><input
+              id="lid-angle"
+              type="range"
+              min="15"
+              max="100"
+              value="100"
+              step="1"
+            />
+            <div class="threshold-row">
+              <span data-i18n="threshold">触发阈值</span>
+              <div role="group" data-i18n-aria="threshold">
+                <button type="button" data-threshold="30" aria-pressed="false">
+                  30°</button
+                ><button type="button" data-threshold="45" aria-pressed="true">
+                  45°</button
+                ><button type="button" data-threshold="60" aria-pressed="false">
+                  60°
+                </button>
+              </div>
+            </div>
+            <p id="lid-status" class="demo-status" role="status"></p>
+            <p class="demo-disclaimer" data-i18n="demoOnly">
+              网页演示，不会操作你的电脑。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="leave" class="section leave-section wrap reveal">
+        <div class="section-heading">
+          <h2>
+            <span data-i18n="leaveA">人自然走开，</span><br /><span
+              class="accent"
+              data-i18n="leaveB"
+              >保护自动接上。</span
+            >
+          </h2>
+          <p data-i18n="leaveCopy">
+            在咖啡馆、共享工位或临时办公地点，设置并布防后，带着手机自然离开。持续断连触发模拟锁屏，减少忘记手动开启保护的情况。
+          </p>
+        </div>
+        <div class="departure-demo" data-state="armed">
+          <div class="departure-scene">
+            <div class="depart-mac">
+              <div class="depart-screen">
+                <div class="depart-task">
+                  <span class="activity-dot" aria-hidden="true"></span
+                  ><code>Agent working…</code>
+                </div>
+                <img
+                  src="/assets/shield-zh.png?v=2"
+                  width="1920"
+                  height="1200"
+                  data-shield
+                  data-i18n-alt="shieldAlt"
+                  alt="ACU 保护界面预览"
+                  loading="lazy"
+                />
+                <span class="depart-enter" data-i18n="btEnterHint"
+                  >按 Enter 验证体验解锁过程</span
+                >
+                <button
+                  type="button"
+                  class="depart-lock"
+                  id="bt-unlock"
+                  data-i18n-aria="btUnlockTitle"
+                >
+                  <svg
+                    class="depart-fingerprint"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 4.4A7.6 7.6 0 0 0 4.4 12c0 1.1.2 2.1.6 3" />
+                    <path d="M12 1.8c2.9 0 5.5 1.3 7.2 3.3" />
+                    <path d="M21.7 10a9.9 9.9 0 0 0-4.5-6" />
+                    <path d="M2.6 13.6A9.4 9.4 0 0 1 12 6.4c1.2 0 2.4.2 3.4.7" />
+                    <path d="M7 12a5 5 0 0 1 10 0c0 1.6-.2 3 .2 4.6" />
+                    <path d="M9.4 15.2a2.6 2.6 0 0 1 5.2 0c0 2-.3 3.4.3 5" />
+                    <path d="M6 17.2c.6 1.1.6 2.2 0 3.2" />
+                    <path d="M18.6 17.6c-.5 1.3-.4 2.4.2 3.3" />
+                  </svg>
+                  <span class="depart-lock-title" data-i18n="btUnlockTitle"
+                    >使用触摸 ID 或 密码解锁</span
+                  >
+                  <span class="depart-lock-hint" data-i18n="btUnlockHint"
+                    >点击体验解锁过程</span
+                  >
+                </button>
+              </div>
+              <div class="depart-base" aria-hidden="true"></div>
+              <span class="device-label" data-i18n="mac">你的 Mac</span>
+            </div>
+            <div class="connection-line" aria-hidden="true"><span>ᛒ</span></div>
+            <div class="phone-device">
+              <div class="phone-notch" aria-hidden="true"></div>
+              <span class="phone-symbol" aria-hidden="true">ᛒ</span
+              ><span class="phone-time" aria-hidden="true">22:14</span
+              ><span class="device-label" data-i18n="phone">你的手机</span>
+            </div>
+            <div class="departure-glow" aria-hidden="true"></div>
+          </div>
+          <div class="departure-timeline">
+            <div data-step="armed" class="is-active">
+              <span>01</span><strong data-i18n="btArmed">已布防</strong>
+            </div>
+            <i aria-hidden="true">→</i>
+            <div data-step="pending">
+              <span>02</span><strong data-i18n="btPending">断连确认</strong>
+            </div>
+            <i aria-hidden="true">→</i>
+            <div data-step="protected">
+              <span>03</span><strong data-i18n="btProtected">模拟锁屏</strong>
+            </div>
+          </div>
+          <div class="departure-bottom">
+            <p id="bt-status" class="demo-status" role="status"></p>
+            <div class="departure-actions">
+              <button
+                type="button"
+                class="text-button"
+                id="bt-leave"
+                data-i18n="leaveAction"
+              >
+                带着手机离开</button
+              ><button
+                type="button"
+                class="text-button"
+                id="bt-return"
+                data-i18n="returnAction"
+                disabled
+              >
+                手机返回</button
+              ><button type="button" class="text-button" id="bt-replay">
+                <span aria-hidden="true">↻</span
+                ><span data-i18n="replay">重新演示</span>
+              </button>
+            </div>
+          </div>
+          <p class="demo-disclaimer" data-i18n="demoOnly">
+            网页演示，不会操作你的电脑。
+          </p>
+        </div>
+        <div class="departure-details">
+          <div>
+            <p data-i18n="reconnect">
+              手机重新连接不会自动解锁。解除保护仍需 Touch ID 或系统密码。
+            </p>
+            <p class="small-note" data-i18n="leaveNote">
+              依据蓝牙连接状态，不是距离或位置检测。依赖设备连接支持；未布防、设备状态不可用或
+              Mac 蓝牙关闭时，不会判定为离开。
+            </p>
+          </div>
+          <button class="text-button" type="button" data-screenshot="bluetooth">
+            <span data-i18n="btMenuLink">查看真实蓝牙设置</span
+            ><span aria-hidden="true">↗</span>
+          </button>
+        </div>
+      </section>
+
+      <section id="install" class="section install-section wrap reveal">
+        <div class="install-copy">
+          <h2>
+            <span data-i18n="installA">下一个任务，</span><br /><span
+              class="accent"
+              data-i18n="installB"
+              >交给 Agent 和 ACU。</span
+            >
+          </h2>
+          <p data-i18n="installCopy">
+            一个安静的菜单栏工具，为长时间桌面任务留出空间。免费、开源，可从源码构建。
+          </p>
+          <a
+            class="button secondary download-button"
+            href="https://github.com/rectcircle/acu/releases/latest"
+            target="_blank"
+            rel="noopener noreferrer"
+            ><span data-i18n="download">从 GitHub 下载安装包</span
+            ><span aria-hidden="true">↗</span></a
+          >
+          <p class="compatibility" data-i18n="compatibility">
+            macOS 15+ · Apple Silicon &amp; Intel · MIT 开源
+          </p>
+        </div>
+        <div class="install-guide">
+          <div class="terminal">
+            <div class="terminal-bar">
+              <span class="window-dots" aria-hidden="true"
+                ><i></i><i></i><i></i></span
+              ><span>Homebrew / zsh</span
+              ><button
+                type="button"
+                class="text-button copy-button"
+                data-copy="brew"
+                data-i18n="copy"
+              >
+                复制命令
+              </button>
+            </div>
+            <pre
+              data-i18n-aria="brewLabel"
+            ><code id="brew-command">brew tap rectcircle/acu https://github.com/rectcircle/acu
+brew install --cask rectcircle/acu/acu</code></pre>
+          </div>
+          <p class="small-note" data-i18n="signature">
+            当前发布产物使用 ad-hoc 签名，未经 Apple
+            公证。确认信任源码与产物后，再允许应用运行。
+          </p>
+          <details class="setup-guide">
+            <summary>
+              <span data-i18n="guide">首次运行指南</span
+              ><span aria-hidden="true">＋</span>
+            </summary>
+            <ol>
+              <li>
+                <h3 data-i18n="setupA">允许 ACU 运行</h3>
+                <p data-i18n="setupAText">
+                  如果 macOS 阻止打开，仅在信任本项目时执行下方命令。它只移除
+                  ACU 的 quarantine，不会全局关闭 Gatekeeper。
+                </p>
+                <div class="quarantine-command">
+                  <code id="quarantine-command"
+                    >/usr/bin/xattr -dr com.apple.quarantine
+                    /Applications/ACU.app</code
+                  ><button
+                    type="button"
+                    class="text-button copy-button"
+                    data-copy="quarantine"
+                    data-i18n="copy"
+                  >
+                    复制命令
+                  </button>
+                </div>
+              </li>
+              <li>
+                <h3 data-i18n="setupB">授予辅助功能权限</h3>
+                <p data-i18n="setupBText">
+                  系统设置 → 隐私与安全性 → 辅助功能，启用 ACU
+                  并重启。仅当权限诊断提示无法监听输入时，才额外开启输入监控。
+                </p>
+              </li>
+              <li>
+                <h3 data-i18n="setupC">先体验 15 秒测试</h3>
+                <p data-i18n="setupCText">
+                  按住 Option 点击菜单栏图标，选择「测试模拟锁屏（15
+                  秒自动退出）」。正式保护中，按 Enter 发起原生认证。
+                </p>
+              </li>
+            </ol>
+          </details>
+          <p id="copy-status" role="status"></p>
+        </div>
+        <aside class="boundary">
+          <div>
+            <h3 data-i18n="boundaryTitle">保护的边界，始终清楚。</h3>
+            <p data-i18n="boundaryCopy">
+              ACU
+              是应用层模拟锁屏，不抵御进程终止、管理员权限或重启，不保证覆盖企业安全策略，也不能保证
+              Agent、电源与网络持续正常。检测到 macOS
+              真实锁屏后自动移除模拟保护，不会尝试解锁系统。
+            </p>
+          </div>
+          <a
+            class="text-button"
+            href="https://github.com/rectcircle/acu#acu"
+            target="_blank"
+            rel="noopener noreferrer"
+            ><span data-i18n="docs">阅读完整说明</span
+            ><span aria-hidden="true">↗</span></a
+          >
+        </aside>
+      </section>
+    </main>
+    <footer class="footer wrap">
+      <a class="brand" href="#"
+        ><img src="/assets/acu-icon.png" width="28" height="28" alt="" /><span
+          >ACU</span
+        ></a
+      >
+      <p data-i18n="footer">让操作电脑的 Agent，继续工作。</p>
+      <div>
+        <a
+          href="https://github.com/rectcircle/acu/blob/main/LICENSE"
+          target="_blank"
+          rel="noopener noreferrer"
+          >MIT License</a
+        ><a
+          href="https://github.com/rectcircle/acu"
+          target="_blank"
+          rel="noopener noreferrer"
+          ><span data-i18n="source">查看源码</span> ↗</a
+        >
+      </div>
+    </footer>
+    <dialog id="screenshot-dialog" aria-labelledby="screenshot-title">
+      <div class="dialog-heading">
+        <h2 id="screenshot-title"></h2>
+        <button
+          type="button"
+          id="close-screenshot"
+          data-i18n-aria="close"
+          aria-label="关闭图片"
+        >
+          ×
+        </button>
+      </div>
+      <img id="screenshot-image" alt="" />
+      <p id="screenshot-caption"></p>
+    </dialog>
+    <noscript
+      ><p class="wrap">
+        请启用 JavaScript 以查看双语内容与交互演示。 / Enable JavaScript for
+        bilingual content and interactive demos.
+        <a href="https://github.com/rectcircle/acu">ACU on GitHub ↗</a>
+      </p></noscript
+    >
+  </body>
+</html>

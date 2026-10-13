@@ -179,6 +179,18 @@ go vet ./...
 See [document](document/README.md) for product requirements and technical
 constraints.
 
+## Product Landing Page
+
+The static site is in `website/` and needs no frontend dependencies. From the
+repository root, run:
+
+```sh
+python3 -m http.server 4173 --bind 127.0.0.1 --directory website
+```
+
+Open <http://127.0.0.1:4173>. See the [deployment guide](document/website-deployment.md)
+for Netlify configuration and Cloudflare CNAME proxy setup for `acu.rectcircle.cn`.
+
 ## License
 
 [MIT License](LICENSE)

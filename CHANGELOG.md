@@ -5,6 +5,18 @@
 This file records notable changes to ACU. Every release includes both Chinese
 and English notes.
 
+## [Unreleased] / 未发布
+
+### 新增
+
+- 新增面向 AI Agent 与 UI 自动化场景的中英双语产品落地页，包含真实菜单截图、原生保护界面预览及交互演示。
+- 新增 Netlify 静态站点配置与 Cloudflare CNAME 橙云代理接入说明。
+
+### Added
+
+- Add a bilingual product landing page for desktop AI agents and UI automation, with real menu screenshots, native shield previews, and interactive demonstrations.
+- Add Netlify static hosting configuration and Cloudflare CNAME proxy setup documentation.
+
 ## [0.1.5] - 2026-10-13
 
 ### 修复

@@ -143,6 +143,17 @@ go vet ./...
 
 产品需求和技术约束见 [document](document/README.md)。
 
+## 产品落地页
+
+产品页源码位于 `website/`，无需安装前端依赖。在仓库根目录运行：
+
+```sh
+python3 -m http.server 4173 --bind 127.0.0.1 --directory website
+```
+
+然后打开 <http://127.0.0.1:4173>。Netlify 配置与 `acu.rectcircle.cn` 的 Cloudflare
+CNAME 橙云代理接入步骤见 [落地页部署说明](document/website-deployment.md)。
+
 ## 许可证
 
 [MIT License](LICENSE)

@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://acu.rectcircle.cn/sitemap.xml
