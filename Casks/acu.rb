@@ -1,8 +1,8 @@
 cask "acu" do
-  version "0.1.4"
-  sha256 "ebaf0a3e1403b84e15c30fb09fdfea245981c1e3ac47d424175eff7b603f9954"
+  version "0.1.5"
+  sha256 "1b3138cb876fd5edb11f71c8725dbedbc82442e161dc0e7773afebbf2bdbc124"
 
-  url "https://github.com/rectcircle/acu/releases/download/v#{version}/ACU.tar.gz"
+  url "https://github.com/rectcircle/acu/releases/download/v#{version}/ACU-0.1.5-macos-universal.tar.gz"
   name "ACU"
   desc "Keep automation sessions active and protected"
   homepage "https://github.com/rectcircle/acu"
