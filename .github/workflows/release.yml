@@ -102,9 +102,16 @@ jobs:
             gh release upload "$RELEASE_TAG" \
               "build/$artifact_base.tar.gz" \
               "build/$artifact_base.tar.gz.sha256" \
-              "build/$artifact_base.pkg" \
-              "build/$artifact_base.pkg.sha256" \
+              "build/$artifact_base.dmg" \
+              "build/$artifact_base.dmg.sha256" \
               --clobber
+            # Remove the obsolete installer when replacing an existing draft.
+            for legacy_asset in "$artifact_base.pkg" "$artifact_base.pkg.sha256"; do
+              if gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' |
+                grep -Fxq "$legacy_asset"; then
+                gh release delete-asset "$RELEASE_TAG" "$legacy_asset" --yes
+              fi
+            done
             gh release edit "$RELEASE_TAG" \
               --title "ACU $RELEASE_TAG" \
               --notes-file build/release-notes.md
@@ -112,8 +119,8 @@ jobs:
             gh release create "$RELEASE_TAG" \
               "build/$artifact_base.tar.gz" \
               "build/$artifact_base.tar.gz.sha256" \
-              "build/$artifact_base.pkg" \
-              "build/$artifact_base.pkg.sha256" \
+              "build/$artifact_base.dmg" \
+              "build/$artifact_base.dmg.sha256" \
               --title "ACU $RELEASE_TAG" \
               --notes-file build/release-notes.md \
               --draft \
@@ -143,9 +150,9 @@ jobs:
           gh release download "$RELEASE_TAG" --dir build \
             --pattern "$artifact_base.tar.gz" \
             --pattern "$artifact_base.tar.gz.sha256" \
-            --pattern "$artifact_base.pkg" \
-            --pattern "$artifact_base.pkg.sha256"
-          for artifact in "$artifact_base.tar.gz" "$artifact_base.pkg"; do
+            --pattern "$artifact_base.dmg" \
+            --pattern "$artifact_base.dmg.sha256"
+          for artifact in "$artifact_base.tar.gz" "$artifact_base.dmg"; do
             expected_sha=$(awk 'NR == 1 { print $1 }' "build/$artifact.sha256")
             actual_sha=$(sha256sum "build/$artifact" | awk '{ print $1 }')
             if [ "$expected_sha" != "$actual_sha" ]; then

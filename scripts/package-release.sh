@@ -16,7 +16,7 @@ fi
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ARTIFACT_BASE="ACU-${VERSION}-macos-universal"
 ARCHIVE="$ROOT/build/$ARTIFACT_BASE.tar.gz"
-PACKAGE="$ROOT/build/$ARTIFACT_BASE.pkg"
+PACKAGE="$ROOT/build/$ARTIFACT_BASE.dmg"
 PACKAGE_TMP=$(mktemp -d "${TMPDIR:-/tmp}/acu-package.XXXXXX")
 trap 'rm -rf "$PACKAGE_TMP"' EXIT
 STAGED_APP="$PACKAGE_TMP/ACU.app"
@@ -29,17 +29,19 @@ rm -f "$ARCHIVE" "$ARCHIVE.sha256" "$PACKAGE" "$PACKAGE.sha256"
 ditto --norsrc "$ROOT/build/ACU.app" "$STAGED_APP"
 codesign --verify --deep --strict "$STAGED_APP"
 tar -czf "$ARCHIVE" -C "$PACKAGE_TMP" ACU.app
-pkgbuild \
-  --component "$STAGED_APP" \
-  --install-location /Applications \
-  --identifier github.com.rectcircle.acu \
-  --version "$VERSION" \
+# Keep the archive app-only; add the drag-and-drop destination to the disk image.
+ln -s /Applications "$PACKAGE_TMP/Applications"
+hdiutil create \
+  -volname "ACU $VERSION" \
+  -srcfolder "$PACKAGE_TMP" \
+  -format UDZO \
+  -ov \
   "$PACKAGE"
 
 (
   cd "$ROOT/build"
   shasum -a 256 "$ARTIFACT_BASE.tar.gz" >"$ARTIFACT_BASE.tar.gz.sha256"
-  shasum -a 256 "$ARTIFACT_BASE.pkg" >"$ARTIFACT_BASE.pkg.sha256"
+  shasum -a 256 "$ARTIFACT_BASE.dmg" >"$ARTIFACT_BASE.dmg.sha256"
 )
 
 printf 'Packaged %s and %s\n' "$ARCHIVE" "$PACKAGE"

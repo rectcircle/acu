@@ -14,7 +14,7 @@ and English notes.
 ### 新增
 
 - 新增持久化分级结构化日志，覆盖 Controller、Guardian 和原生桥接关键链路，自动轮转日志文件。
-- 发布草稿新增 macOS 通用 `.pkg` 安装包及 SHA-256，统一版本化产物命名；正式发布须用户明确授权。
+- 发布草稿新增 macOS 通用 `.dmg` 拖拽安装包及 SHA-256，统一版本化产物命名；正式发布须用户明确授权。
 
 ### Fixed
 
@@ -23,7 +23,7 @@ and English notes.
 ### Added
 
 - Add persistent structured logs with severity levels and rotation across Controller, Guardian, and the native bridge.
-- Include universal macOS installers and checksums in release drafts, with versioned artifact names and explicit user authorization before publication.
+- Include universal macOS drag-and-drop disk images and checksums in release drafts, with versioned artifact names and explicit user authorization before publication.
 
 ## [0.1.4] - 2026-10-13
 

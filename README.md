@@ -53,8 +53,8 @@ open "build/ACU.app"
 ## 手动安装
 
 从下一版本的 [GitHub Release](https://github.com/rectcircle/acu/releases) 下载
-`ACU-<版本>-macos-universal.pkg`，双击并按 Installer 提示安装到 `/Applications`。
-Release 也会同时提供同名 `.tar.gz` 归档。应用使用 ad-hoc 签名；安装包本身未签名，
+`ACU-<版本>-macos-universal.dmg`，双击打开后，将 `ACU.app` 拖到 `Applications` 快捷方式即可安装。
+Release 也会同时提供同名 `.tar.gz` 归档。应用使用 ad-hoc 签名；磁盘映像本身未签名，
 两者均未经 Apple 公证。若 macOS 阻止打开安装包或应用，请只在确认信任发布产物后，
 按系统提示允许打开，或移除应用 quarantine：
 
@@ -73,17 +73,17 @@ Release 也会同时提供同名 `.tar.gz` 归档。应用使用 ad-hoc 签名�
 open "build/ACU.app"
 ```
 
-生成同时支持 Apple Silicon 和 Intel Mac 的发布归档和 macOS 安装包：
+生成同时支持 Apple Silicon 和 Intel Mac 的发布归档和拖拽安装 DMG：
 
 ```sh
 ./scripts/package-release.sh 0.1.3
 ```
 
 推送 `v0.1.5` 格式的标签后，GitHub Actions 会自动测试、构建
-`ACU-<版本>-macos-universal.tar.gz`、`ACU-<版本>-macos-universal.pkg` 及各自的 SHA-256 文件，并创建**草稿 Release**，此时不会公开发布或更新 Homebrew。
+`ACU-<版本>-macos-universal.tar.gz`、`ACU-<版本>-macos-universal.dmg` 及各自的 SHA-256 文件，并创建**草稿 Release**，此时不会公开发布或更新 Homebrew。
 Release Notes 来自 `CHANGELOG.md` 中对应版本的双语章节；缺少该版本时构建会失败。
 
-草稿生成后，先由用户下载并验证 `.pkg` 和归档。只有用户明确授权发布后，才打开
+草稿生成后，先由用户下载并验证 `.dmg` 和归档。只有用户明确授权发布后，才打开
 **Actions → Release → Run workflow**，选择 `main`，在 `version` 中输入对应标签（如
 `v0.1.5`）。流水线会核对草稿中两个产物的 SHA-256，公开 Release，并更新 Homebrew Cask
 （Cask 使用 `.tar.gz` 归档），不会重新构建。公开发布后的版本不会被 tag 构建任务覆盖；修复应使用新版本标签。

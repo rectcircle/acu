@@ -32,11 +32,10 @@ brew install --cask rectcircle/acu/acu
 ## Manual Installation
 
 Starting with the next release, download
-`ACU-<version>-macos-universal.pkg` from the
+`ACU-<version>-macos-universal.dmg` from the
 [GitHub Releases page](https://github.com/rectcircle/acu/releases), then
-double-click it and follow the Installer prompts to install ACU in
-`/Applications`. Each release will also include the matching `.tar.gz` archive.
-The app uses an ad-hoc signature; the installer package is unsigned, and neither
+open it and drag `ACU.app` onto the `Applications` shortcut. Each release will also include the matching `.tar.gz` archive.
+The app uses an ad-hoc signature; the disk image is unsigned, and neither
 is notarized by Apple. If macOS blocks the installer or app, only allow it after
 verifying that you trust the release artifacts. You can remove the app's quarantine with:
 
@@ -84,7 +83,7 @@ Requires macOS 15 or later, Go 1.22 or later, and Xcode Command Line Tools.
 open "build/ACU.app"
 ```
 
-Build a release archive and macOS installer that support both Apple Silicon
+Build a release archive and drag-and-drop DMG that support both Apple Silicon
 and Intel Macs:
 
 ```sh
@@ -92,12 +91,12 @@ and Intel Macs:
 ```
 
 Pushing a tag such as `v0.1.5` runs tests, builds
-`ACU-<version>-macos-universal.tar.gz`, `ACU-<version>-macos-universal.pkg`,
+`ACU-<version>-macos-universal.tar.gz`, `ACU-<version>-macos-universal.dmg`,
 their SHA-256 files, and creates a **draft release**. This does not publish the
 release or update Homebrew. Release notes come from the matching bilingual section in
 `CHANGELOG.md`; the build fails if that version is missing.
 
-After the user downloads and verifies the draft's installer and archive, publish
+After the user downloads and verifies the draft's DMG and archive, publish
 only with the user's explicit authorization. Then open **Actions → Release → Run
 workflow**, select `main`, and enter the tag (for example, `v0.1.5`) in `version`.
 The workflow verifies both SHA-256 values, publishes the reviewed assets without
