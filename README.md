@@ -154,6 +154,12 @@ python3 -m http.server 4173 --bind 127.0.0.1 --directory website
 然后打开 <http://127.0.0.1:4173>。Netlify 配置与 `acu.rectcircle.cn` 的 Cloudflare
 CNAME 橙云代理接入步骤见 [落地页部署说明](document/website-deployment.md)。
 
+## 支持项目
+
+如果 ACU 对你有帮助，欢迎自愿支持项目维护。赞助将用于开发、测试和基础设施费用；软件继续免费开源。
+
+- [爱发电](https://afdian.com/a/rectcircle)
+
 ## 许可证
 
 [MIT License](LICENSE)

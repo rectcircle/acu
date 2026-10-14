@@ -5,6 +5,18 @@
 This file records notable changes to ACU. Every release includes both Chinese
 and English notes.
 
+## [0.1.7] - 2026-10-14
+
+### 新增
+
+- 官网安装区增加爱发电和 Ko-fi 捐赠按钮，随页面语言展示对应入口；README 增加捐赠链接。
+- 菜单栏“官网 · 捐赠”入口直接跳转到官网捐赠位置。
+
+### Added
+
+- Add Afdian and Ko-fi donation buttons to the website installation section, shown according to the selected language, and add donation links to the README files.
+- Change the menu bar item to “Website · Donate” and link directly to the donation section.
+
 ## [0.1.6] - 2026-10-14
 
 ### 新增

@@ -686,7 +686,7 @@ static void show_launch_at_login_error(NSString *action, NSError *error) {
 - (void)openWebsite:(id)sender {
     (void)sender;
     [[NSWorkspace sharedWorkspace]
-        openURL:[NSURL URLWithString:@"https://acu.rectcircle.cn/"]];
+        openURL:[NSURL URLWithString:@"https://acu.rectcircle.cn/#donate"]];
 }
 - (void)toggleLidAutomation:(id)sender {
     (void)sender;

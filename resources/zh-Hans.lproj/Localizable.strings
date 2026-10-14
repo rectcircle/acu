@@ -25,7 +25,7 @@
 "menu.launch_at_login" = "登录后自动启动";
 "menu.launch_at_login.approval_required" = "登录后自动启动（需系统批准）";
 "menu.quit" = "退出";
-"menu.open_website" = "打开官网";
+"menu.open_website" = "官网 · 捐赠";
 "label.default" = "（默认）";
 
 "state.format" = "状态：%@";

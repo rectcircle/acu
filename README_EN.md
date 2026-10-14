@@ -191,6 +191,12 @@ python3 -m http.server 4173 --bind 127.0.0.1 --directory website
 Open <http://127.0.0.1:4173>. See the [deployment guide](document/website-deployment.md)
 for Netlify configuration and Cloudflare CNAME proxy setup for `acu.rectcircle.cn`.
 
+## Support the Project
+
+If ACU is useful to you, you can support its development and maintenance. Contributions help cover development, testing, and infrastructure costs. The software remains free and open source.
+
+- [Ko-fi](https://ko-fi.com/rectcircle)
+
 ## License
 
 [MIT License](LICENSE)

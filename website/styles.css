@@ -1361,6 +1361,74 @@ input[type="range"] {
 .install-copy > p {
   margin-top: 24px;
 }
+.install-support {
+  margin-top: 30px;
+}
+.support-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 13px;
+  min-height: 58px;
+  padding: 10px 16px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #fff;
+  box-shadow: 0 8px 24px #0003;
+  transition:
+    transform 160ms ease,
+    filter 160ms ease,
+    box-shadow 160ms ease;
+}
+.support-cta:hover {
+  color: #fff;
+  filter: brightness(1.07);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px #0005;
+}
+.support-cta-afdian {
+  background: #946ce6;
+}
+.support-cta-kofi {
+  background: #ff5e5b;
+}
+html[lang="zh-CN"] .support-cta-kofi,
+html[lang="en"] .support-cta-afdian {
+  display: none;
+}
+.support-cta-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 8px;
+  background: #ffffff2b;
+  font-size: 19px;
+}
+.support-cta-icon svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+.support-cta-label {
+  display: grid;
+  gap: 3px;
+}
+.support-cta-label strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+.support-cta-label small {
+  font-size: 9px;
+  opacity: 0.82;
+}
+.support-cta-arrow {
+  margin-left: 10px;
+  font-size: 15px;
+}
 .download-button {
   margin-top: 26px;
   font-size: 12px;
@@ -1542,6 +1610,20 @@ summary::-webkit-details-marker {
 .footer p {
   font-size: 10px;
   color: #597585;
+}
+.footer-support {
+  display: grid;
+  gap: 7px;
+  font-size: 10px;
+  color: #8199a9;
+}
+.support-links {
+  display: flex;
+  gap: 14px;
+}
+html[lang="zh-CN"] .support-links a[lang="en"],
+html[lang="en"] .support-links a[lang="zh-CN"] {
+  display: none;
 }
 .footer > div {
   margin-left: auto;
@@ -2242,6 +2324,9 @@ html[lang="en"] .departure-actions {
     height: 26px;
   }
   .footer p {
+    font-size: 9px;
+  }
+  .footer-support {
     font-size: 9px;
   }
   .footer > div {
