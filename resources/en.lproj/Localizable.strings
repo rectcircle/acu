@@ -25,6 +25,7 @@
 "menu.launch_at_login" = "Launch at Login";
 "menu.launch_at_login.approval_required" = "Launch at Login (Approval Required)";
 "menu.quit" = "Quit";
+"menu.open_website" = "Open Website";
 "label.default" = " (Default)";
 
 "state.format" = "Status: %@";

@@ -97,9 +97,15 @@ export const copy = {
     installA: "下一个任务，",
     installB: "交给 Agent 和 ACU。",
     installCopy:
-      "一个安静的菜单栏工具，为长时间桌面任务留出空间。免费、开源，可从源码构建。",
-    download: "从 GitHub 下载安装包",
-    brewLabel: "Homebrew 安装命令",
+      "推荐使用 Homebrew 安装。依次执行下方三条命令，然后启动 ACU。不使用 Homebrew 时，也可以手动下载安装包。",
+    brewTitle: "推荐：Homebrew 安装",
+    brewIntro:
+      "已安装 Homebrew 时，在终端依次执行以下三条命令。确认信任 ACU 的发布产物后，再执行第三条命令。",
+    manualTitle: "手动安装（无需 Homebrew）",
+    manualSteps:
+      "从 GitHub Releases 下载 macOS 通用 .dmg，打开后将 ACU.app 拖入 Applications。安装完成后，同样执行上面的第三条命令，再启动 ACU。",
+    download: "手动下载 .dmg 安装包",
+    brewLabel: "Homebrew 安装及允许 ACU 运行的三条命令",
     copy: "复制命令",
     copied: "已复制",
     signature:
@@ -107,7 +113,7 @@ export const copy = {
     guide: "首次运行指南",
     setupA: "允许 ACU 运行",
     setupAText:
-      "如果 macOS 阻止打开，仅在信任本项目时执行下方命令。它只移除 ACU 的 quarantine，不会全局关闭 Gatekeeper。",
+      "Homebrew 安装中已执行第三条命令的用户无需重复执行。手动安装后，仅在信任本项目时执行下方命令；它只移除 ACU 的 quarantine，不会全局关闭 Gatekeeper。",
     setupB: "授予辅助功能权限",
     setupBText:
       "系统设置 → 隐私与安全性 → 辅助功能，启用 ACU 并重启。仅当权限诊断提示无法监听输入时，才额外开启输入监控。",
@@ -229,9 +235,15 @@ export const copy = {
     installA: "Your next task.",
     installB: "With your agent and ACU.",
     installCopy:
-      "A quiet menu bar utility for long-running desktop tasks. Free, open source, and available to build from source.",
-    download: "Download the installer on GitHub",
-    brewLabel: "Homebrew installation commands",
+      "Homebrew is the recommended installation method. Run the three commands below in order, then launch ACU. You can also download and install the app manually without Homebrew.",
+    brewTitle: "Recommended: Install with Homebrew",
+    brewIntro:
+      "With Homebrew installed, run these three commands in Terminal in order. Run the third command only after confirming that you trust the ACU release artifacts.",
+    manualTitle: "Manual installation (no Homebrew required)",
+    manualSteps:
+      "Download the universal macOS .dmg from GitHub Releases, open it, and drag ACU.app into Applications. Then run the third command shown above and launch ACU.",
+    download: "Download the .dmg installer manually",
+    brewLabel: "Three commands to install ACU with Homebrew and allow it to run",
     copy: "Copy commands",
     copied: "Copied",
     signature:
@@ -239,7 +251,7 @@ export const copy = {
     guide: "First-run guide",
     setupA: "Allow ACU to run",
     setupAText:
-      "If macOS blocks launch, use the command below only if you trust this project. It removes quarantine from ACU only and does not disable Gatekeeper globally.",
+      "If you already ran the third Homebrew installation command, you do not need to repeat it. After a manual installation, run the command below only if you trust this project. It removes quarantine from ACU only and does not disable Gatekeeper globally.",
     setupB: "Grant Accessibility access",
     setupBText:
       "System Settings → Privacy & Security → Accessibility. Enable ACU and restart it. Grant Input Monitoring only if diagnostics reports that input events cannot be monitored.",

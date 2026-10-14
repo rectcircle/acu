@@ -566,21 +566,17 @@
             >
           </h2>
           <p data-i18n="installCopy">
-            一个安静的菜单栏工具，为长时间桌面任务留出空间。免费、开源，可从源码构建。
+            推荐使用 Homebrew 安装。依次执行下方三条命令，然后启动 ACU。不使用 Homebrew 时，也可以手动下载安装包。
           </p>
-          <a
-            class="button secondary download-button"
-            href="https://github.com/rectcircle/acu/releases/latest"
-            target="_blank"
-            rel="noopener noreferrer"
-            ><span data-i18n="download">从 GitHub 下载安装包</span
-            ><span aria-hidden="true">↗</span></a
-          >
           <p class="compatibility" data-i18n="compatibility">
             macOS 15+ · Apple Silicon &amp; Intel · MIT 开源
           </p>
         </div>
         <div class="install-guide">
+          <h3 class="brew-title" data-i18n="brewTitle">推荐：Homebrew 安装</h3>
+          <p class="small-note brew-intro" data-i18n="brewIntro">
+            已安装 Homebrew 时，在终端依次执行以下三条命令。确认信任 ACU 的发布产物后，再执行第三条命令。
+          </p>
           <div class="terminal">
             <div class="terminal-bar">
               <span class="window-dots" aria-hidden="true"
@@ -598,12 +594,27 @@
             <pre
               data-i18n-aria="brewLabel"
             ><code id="brew-command">brew tap rectcircle/acu https://github.com/rectcircle/acu
-brew install --cask rectcircle/acu/acu</code></pre>
+brew install --cask rectcircle/acu/acu
+/usr/bin/xattr -dr com.apple.quarantine /Applications/ACU.app</code></pre>
           </div>
           <p class="small-note" data-i18n="signature">
             当前发布产物使用 ad-hoc 签名，未经 Apple
             公证。确认信任源码与产物后，再允许应用运行。
           </p>
+          <div class="manual-install">
+            <h3 data-i18n="manualTitle">手动安装（无需 Homebrew）</h3>
+            <p class="small-note" data-i18n="manualSteps">
+              从 GitHub Releases 下载 macOS 通用 .dmg，打开后将 ACU.app 拖入 Applications。安装完成后，同样执行上面的第三条命令，再启动 ACU。
+            </p>
+            <a
+              class="button secondary download-button"
+              href="https://github.com/rectcircle/acu/releases/latest"
+              target="_blank"
+              rel="noopener noreferrer"
+              ><span data-i18n="download">手动下载 .dmg 安装包</span
+              ><span aria-hidden="true">↗</span></a
+            >
+          </div>
           <details class="setup-guide">
             <summary>
               <span data-i18n="guide">首次运行指南</span
@@ -613,13 +624,11 @@ brew install --cask rectcircle/acu/acu</code></pre>
               <li>
                 <h3 data-i18n="setupA">允许 ACU 运行</h3>
                 <p data-i18n="setupAText">
-                  如果 macOS 阻止打开，仅在信任本项目时执行下方命令。它只移除
-                  ACU 的 quarantine，不会全局关闭 Gatekeeper。
+                  Homebrew 安装中已执行第三条命令的用户无需重复执行。手动安装后，仅在信任本项目时执行下方命令；它只移除 ACU 的 quarantine，不会全局关闭 Gatekeeper。
                 </p>
                 <div class="quarantine-command">
                   <code id="quarantine-command"
-                    >/usr/bin/xattr -dr com.apple.quarantine
-                    /Applications/ACU.app</code
+                    >/usr/bin/xattr -dr com.apple.quarantine /Applications/ACU.app</code
                   ><button
                     type="button"
                     class="text-button copy-button"

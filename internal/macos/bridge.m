@@ -633,6 +633,7 @@ static void show_launch_at_login_error(NSString *action, NSError *error) {
 - (void)selectBluetoothPresenceDevice:(id)sender;
 - (void)selectShieldBackground:(id)sender;
 - (void)selectHotKey:(id)sender;
+- (void)openWebsite:(id)sender;
 - (void)quit:(id)sender;
 @end
 
@@ -681,6 +682,11 @@ static void show_launch_at_login_error(NSString *action, NSError *error) {
 - (void)diagnostics:(id)sender {
     (void)sender;
     acuMenuAction(ACU_MENU_DIAGNOSTICS);
+}
+- (void)openWebsite:(id)sender {
+    (void)sender;
+    [[NSWorkspace sharedWorkspace]
+        openURL:[NSURL URLWithString:@"https://acu.rectcircle.cn/"]];
 }
 - (void)toggleLidAutomation:(id)sender {
     (void)sender;
@@ -947,6 +953,13 @@ int acu_init_menu(void) {
                                keyEquivalent:@""];
         gLaunchAtLoginMenuItem.target = gMenuTarget;
         [menu addItem:gLaunchAtLoginMenuItem];
+
+        NSMenuItem *website =
+            [[NSMenuItem alloc] initWithTitle:localized(@"menu.open_website")
+                                      action:@selector(openWebsite:)
+                               keyEquivalent:@""];
+        website.target = gMenuTarget;
+        [menu addItem:website];
 
         NSMenuItem *quit =
             [[NSMenuItem alloc] initWithTitle:localized(@"menu.quit")

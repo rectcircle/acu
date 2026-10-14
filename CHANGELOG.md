@@ -5,17 +5,27 @@
 This file records notable changes to ACU. Every release includes both Chinese
 and English notes.
 
-## [Unreleased] / 未发布
+## [0.1.6] - 2026-10-14
 
 ### 新增
 
+- 菜单栏新增“打开官网”入口，使用默认浏览器打开 `https://acu.rectcircle.cn/`。
 - 新增面向 AI Agent 与 UI 自动化场景的中英双语产品落地页，包含真实菜单截图、原生保护界面预览及交互演示。
 - 新增 Netlify 静态站点配置与 Cloudflare CNAME 橙云代理接入说明。
 
+### 变更
+
+- 官网安装区优先推荐 Homebrew，提供包含允许应用运行步骤的三条完整命令，并单独说明手动 DMG 安装。
+
 ### Added
 
+- Add an "Open Website" menu item that opens `https://acu.rectcircle.cn/` in the default browser.
 - Add a bilingual product landing page for desktop AI agents and UI automation, with real menu screenshots, native shield previews, and interactive demonstrations.
 - Add Netlify static hosting configuration and Cloudflare CNAME proxy setup documentation.
+
+### Changed
+
+- Recommend Homebrew on the website with all three installation and launch-allowance commands, and document manual DMG installation separately.
 
 ## [0.1.5] - 2026-10-13
 

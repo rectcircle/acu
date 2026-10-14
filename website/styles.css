@@ -1407,6 +1407,31 @@ input[type="range"] {
 .install-guide > .small-note {
   margin-top: 17px;
 }
+.brew-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.install-guide > .brew-intro {
+  margin-top: 10px;
+  margin-bottom: 18px;
+}
+.manual-install {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.manual-install h3 {
+  font-size: 13px;
+  font-weight: 550;
+  color: #b9c9d2;
+}
+.manual-install > p {
+  margin-top: 10px;
+}
+.manual-install .download-button {
+  margin-top: 16px;
+}
 .setup-guide {
   margin-top: 22px;
   border-top: 1px solid var(--line);
