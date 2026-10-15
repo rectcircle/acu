@@ -36,6 +36,10 @@ jobs:
           cache: false
           go-version: "1.22.x"
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Refuse to overwrite a public release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -48,10 +52,18 @@ jobs:
           fi
 
       - name: Extract release notes
+        env:
+          QUARK_SHARE_URL: ${{ vars.QUARK_SHARE_URL }}
+          QUARK_SHARE_CODE: ${{ vars.QUARK_SHARE_CODE }}
         run: |
           mkdir -p build
           ./scripts/extract-release-notes.sh "$RELEASE_TAG" \
             > build/release-notes.md
+          if [ -n "$QUARK_SHARE_URL" ]; then
+            printf '\n国内下载 / China mirror: %s\n提取码 / Code: %s\n' \
+              "$QUARK_SHARE_URL" "$QUARK_SHARE_CODE" >> build/release-notes.md
+            printf '正式发布后同步；镜像失败时请使用 GitHub 下载。 / Synced after publication; use GitHub if mirroring fails.\n' >> build/release-notes.md
+          fi
 
       - name: Test
         run: |
@@ -139,32 +151,16 @@ jobs:
         with:
           ref: main
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Download and verify the reviewed release assets
         run: |
-          is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)
-          if [ "$is_draft" != "true" ]; then
-            echo "::error::Only a reviewed draft release can be published."
-            exit 1
-          fi
-          artifact_base="ACU-${RELEASE_TAG#v}-macos-universal"
-          gh release download "$RELEASE_TAG" --dir build \
-            --pattern "$artifact_base.tar.gz" \
-            --pattern "$artifact_base.tar.gz.sha256" \
-            --pattern "$artifact_base.dmg" \
-            --pattern "$artifact_base.dmg.sha256"
-          for artifact in "$artifact_base.tar.gz" "$artifact_base.dmg"; do
-            expected_sha=$(awk 'NR == 1 { print $1 }' "build/$artifact.sha256")
-            actual_sha=$(sha256sum "build/$artifact" | awk '{ print $1 }')
-            if [ "$expected_sha" != "$actual_sha" ]; then
-              echo "::error::$artifact checksum mismatch."
-              exit 1
-            fi
-          done
+          python3 scripts/quark-release.py verify "$RELEASE_TAG" --draft --output build
 
-      - name: Publish the release and update Homebrew cask
+      - name: Publish the reviewed release
         run: |
-          archive="ACU-${RELEASE_TAG#v}-macos-universal.tar.gz"
-          sha256=$(awk 'NR == 1 { print $1 }' "build/$archive.sha256")
           git fetch origin main
           git checkout -B homebrew-update origin/main
           current_version=$(awk '/^  version / { gsub(/"/, "", $2); print $2 }' Casks/acu.rb)
@@ -173,14 +169,18 @@ jobs:
           if [ "$comparison" = "-1" ]; then
             latest=false
           fi
-          ./scripts/update-cask.sh "$RELEASE_TAG" "$sha256"
-          # Retries also repair the Cask if publication succeeded but pushing failed.
           gh release edit "$RELEASE_TAG" --draft=false --latest="$latest"
-          git add Casks/acu.rb
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git -c user.name=github-actions[bot] \
-              -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
-              commit -m "chore(homebrew): update acu to ${RELEASE_TAG#v}"
-          git push origin HEAD:main
+
+  mirror-quark:
+    needs: publish
+    uses: ./.github/workflows/mirror-quark.yml
+    with:
+      tag: ${{ inputs.version }}
+    secrets:
+      QUARK_AUTH: ${{ secrets.QUARK_AUTH }}
+
+  update-cask:
+    needs: publish
+    uses: ./.github/workflows/update-cask.yml
+    with:
+      tag: ${{ inputs.version }}

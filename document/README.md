@@ -12,6 +12,7 @@ ACU 是一个独立的 macOS 菜单栏工具，用于在 UI 自动化客户端�
 
 1. [需求文档](requirements.md)
 2. [技术方案](technical-design.md)
+3. [发布与夸克镜像维护](releasing.md)
 
 关键边界：
 

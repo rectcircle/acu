@@ -2531,3 +2531,20 @@ html[lang="en"] .departure-actions {
     animation: none !important;
   }
 }
+
+/* A compact domestic mirror hint in the left installation column. */
+.install-copy > .download-mirror {
+  margin-top: 16px;
+  font-size: 12px;
+  line-height: 1.9;
+  color: var(--muted);
+}
+.download-mirror a {
+  color: #b9c9d2;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.download-mirror a:hover { color: var(--ink); }
+.download-mirror code { font: inherit; }
+.download-mirror [hidden],
+html[lang="en"] .download-mirror { display: none; }

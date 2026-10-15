@@ -1,4 +1,28 @@
 import { copy } from "./content.js";
+import { mirror } from "./mirror-config.js";
+
+// Static HTML keeps the verified link usable without JavaScript.
+// When JavaScript is enabled, the public configuration controls availability.
+document.querySelector("#quark-download").hidden = true;
+document.querySelector("#quark-code").hidden = true;
+document.querySelector("#quark-pending").hidden = false;
+try {
+  const url = new URL(mirror.url);
+  if (url.protocol === "https:" && url.hostname === "pan.quark.cn" &&
+      /^\/s\/[A-Za-z0-9]+$/.test(url.pathname) && !url.username && !url.password) {
+    const link = document.querySelector("#quark-download");
+    link.href = url.href;
+    link.hidden = false;
+    document.querySelector("#quark-pending").hidden = true;
+    if (mirror.code) {
+      const code = document.querySelector("#quark-code");
+      code.querySelector("code").textContent = mirror.code;
+      code.hidden = false;
+    }
+  }
+} catch {
+  // An empty or invalid URL leaves the existing GitHub download available.
+}
 
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let language = "zh";

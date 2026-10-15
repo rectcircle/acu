@@ -5,6 +5,20 @@
 This file records notable changes to ACU. Every release includes both Chinese
 and English notes.
 
+## [0.1.8] - 2026-10-15
+
+### 新增
+
+- 官网中文安装区左侧增加夸克网盘入口及提取码，README 使用同一永久分享；v0.1.7 已手动镜像并完成四文件回读校验。
+- 正式发布后自动将原始安装包及校验和镜像到夸克，支持暂存回读校验和独立补传；Homebrew 更新拆为独立任务并支持重试。
+- 增加发布维护文档及固定版本夸克 CLI 的安装、授权同步入口。启用需配置 ACU 专属网盘目录和授权。
+
+### Added
+
+- Add a compact Quark mirror entry and passcode to the left side of the Chinese installation section and the same permanent share to the README; manually mirror v0.1.7 and verify all four files by downloading them back.
+- Mirror original public release installers and checksums to Quark with staging, download verification and independent retries; run Homebrew updates independently with a recovery entry point.
+- Document release operations and add pinned Quark CLI installation and authorization synchronization. Activation requires ACU directory and credential configuration.
+
 ## [0.1.7] - 2026-10-14
 
 ### 新增

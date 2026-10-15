@@ -1,0 +1,46 @@
+name: Update Homebrew Cask
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Already public stable release tag
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: acu-homebrew-update
+  cancel-in-progress: false
+jobs:
+  update-cask:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify public assets and update Cask
+        run: |
+          python3 scripts/quark-release.py verify "$RELEASE_TAG" --output build
+          archive="ACU-${RELEASE_TAG#v}-macos-universal.tar.gz"
+          sha256=$(sha256sum "build/$archive" | awk '{ print $1 }')
+          ./scripts/update-cask.sh "$RELEASE_TAG" "$sha256"
+          git add Casks/acu.rb
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git -c user.name=github-actions[bot] \
+              -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+              commit -m "chore(homebrew): update acu to ${RELEASE_TAG#v}"
+          git push origin HEAD:main

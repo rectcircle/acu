@@ -73,3 +73,16 @@ Cloudflare 的 SSL/TLS 加密模式使用 **Full (strict)**；如区域内其他
 - [Netlify 外部 DNS 的 CNAME 接入](https://docs.netlify.com/manage/domains/configure-domains/configure-external-dns/)
 - [Netlify HTTPS 与证书](https://docs.netlify.com/manage/domains/secure-domains-with-https/https-ssl/)
 - [Cloudflare Full (strict) 源站证书要求](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/)
+
+## 夸克下载入口
+
+中文安装区左侧介绍栏、兼容性说明与捐赠入口之间显示紧凑的国内下载说明，英文页面隐藏该说明。
+配置位于 `website/mirror-config.js`：`url` 填 ACU 永久分享的完整 HTTPS 链接，
+`code` 填公开提取码；只有 `https://pan.quark.cn/s/<分享ID>` 链接会被启用。
+空链接或非法链接显示“夸克网盘准备中，暂请从 GitHub 下载”，不生成占位下载链接。
+
+通过分享链接确认四个文件可下载后，再填入配置并按现有 Netlify 流程部署。
+这里是公开静态配置，不能存放登录凭据。GitHub 的 `QUARK_SHARE_URL`、`QUARK_SHARE_CODE`
+只用于 Release Notes，不会自动注入此静态网站；更换分享时需同时维护两处。
+
+当前 ACU 永久分享已填入配置及 HTML 无脚本回退链接。更换分享时两处一并更新。

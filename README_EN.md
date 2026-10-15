@@ -204,3 +204,7 @@ If ACU is useful to you, you can support its development and maintenance. Contri
 ## Logs
 
 ACU writes INFO, WARN, and ERROR JSON records to `~/Library/Logs/ACU/acu.log`. Controller, Guardian, and the native bridge share logs with timestamps, severity, process role, and PID. Files rotate at 5 MiB with three backups. Credentials and IPC tokens are not logged. Use `tail -f ~/Library/Logs/ACU/acu.log` to inspect session notifications, state transitions, and cleanup.
+
+Release maintenance, Quark mirror setup and recovery steps are documented in the
+[release guide (Chinese)](document/releasing.md). Quark mirrors are populated only
+from public stable releases after explicit publication authorization.
