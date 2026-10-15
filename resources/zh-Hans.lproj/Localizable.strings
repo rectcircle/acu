@@ -17,7 +17,7 @@
 "menu.lid_automation" = "半合盖自动保护";
 "menu.lid_automation.sensor_unavailable" = "半合盖自动保护（传感器不可用）";
 "menu.lid_angle" = "半合盖触发角度";
-"menu.test_protection" = "测试模拟锁屏（15 秒自动退出）";
+"menu.test_protection" = "测试模拟锁屏（30 秒自动退出）";
 "menu.diagnostics" = "权限诊断";
 "menu.hotkey" = "开启快捷键";
 "menu.hotkey.registration_failed" = "开启快捷键（注册失败）";
@@ -35,7 +35,7 @@
 "state.preflighting_protection" = "正在预检模拟锁屏";
 "state.keep_awake_active" = "仅防锁屏运行中";
 "state.switching_to_protection" = "正在切换到模拟锁屏";
-"state.starting_test" = "正在启动 15 秒测试";
+"state.starting_test" = "正在启动 30 秒测试";
 "state.starting" = "正在启动";
 "state.stopping_keep_awake" = "正在停止防锁屏";
 "state.stop_keep_awake_failed" = "停止防锁屏失败";
@@ -46,7 +46,7 @@
 "state.protection_lost" = "保护已失效";
 "state.keep_awake_lost" = "防锁屏已失效";
 "state.keep_awake_error" = "防锁屏异常";
-"state.test_active" = "测试保护中（15 秒自动退出）";
+"state.test_active" = "测试保护中（30 秒自动退出）";
 "state.keep_awake_restore_failed" = "恢复防锁屏失败";
 "state.restoring_keep_awake" = "正在恢复防锁屏";
 "state.protected" = "模拟锁屏保护中";

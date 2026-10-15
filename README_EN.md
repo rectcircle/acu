@@ -141,10 +141,10 @@ depends on macOS and the Bluetooth device; ACU must remain running for this
 feature.
 
 For initial validation, hold `Option` while clicking the menu bar icon, then
-select "Test Simulated Lock Screen (Stops After 15 Seconds)." "Permission
+select "Test Simulated Lock Screen (Stops After 30 Seconds)." "Permission
 Diagnostics" is also located in this hidden menu. Test mode uses the complete
 protection layer and input interception. The shield displays the remaining
-time, and Guardian removes it automatically after 15 seconds. During regular
+time, and Guardian removes it automatically after 30 seconds. During regular
 protection, press physical Enter to open native macOS authentication. The
 protection ends only after successful authentication.
 

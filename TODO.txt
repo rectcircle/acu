@@ -22,6 +22,3 @@ I'm looking at how to enable remote access on a MacBook with the lid closed and 
 - 内置屏幕合盖后必然物理关闭，无法保持点亮；BetterDisplay 提供的是虚拟屏幕。
 - 最稳定的方案仍是：**电源 + HDMI/USB-C 虚拟显示器（Dummy Plug）**，macOS 会进入官方合盖模式。
 - 禁用自动锁屏会降低安全性，远程使用更建议保留短时锁屏并用密码/Touch ID 解锁。
-
-
-TODO2: 外接显示器也实现超时调暗屏幕参考 better display

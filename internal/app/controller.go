@@ -77,6 +77,11 @@ func Run() (runErr error) {
 	if macos.SessionLocked() {
 		controller.lidAutomation.suppressUntilReopened()
 	}
+	// A previous Guardian may have been killed while displays were dimmed;
+	// restore from persisted state before anything else touches brightness.
+	if !macos.RestorePersistedPowerSettings() {
+		slog.Warn("persisted dimmed displays not fully restored")
+	}
 	controller.updateBluetoothPresenceStatus(false, false)
 	go controller.loop()
 	// 进程重启后，若用户之前持久化开启了防锁屏，则自动恢复。
@@ -112,7 +117,7 @@ func (c *Controller) loop() {
 			case macos.MenuKeepAwake:
 				c.toggleKeepAwake()
 			case macos.MenuTest:
-				c.enable(15)
+				c.enable(30)
 			case macos.MenuDiagnostics:
 				c.showDiagnostics()
 			case macos.MenuLidConfig:
@@ -531,6 +536,11 @@ func (c *Controller) handleChildEvent(event childEvent) {
 	if event.exited {
 		if event.err != nil {
 			slog.Error("guardian exited abnormally", "error", event.err)
+			// The Guardian died with its in-memory restore table; the
+			// Controller restores brightness from persisted state.
+			if !macos.RestorePersistedPowerSettings() {
+				slog.Warn("persisted brightness restore incomplete")
+			}
 		} else {
 			slog.Info("guardian exited")
 		}

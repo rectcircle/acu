@@ -49,6 +49,7 @@ var (
 	lidAngleChanged           = make(chan struct{}, 1)
 	sessionLockEvents         = make(chan string, 4)
 	bluetoothDisconnectEvents = make(chan string, 8)
+	powerReconfigure          = make(chan struct{}, 1)
 )
 
 //export acuMenuAction
@@ -113,6 +114,14 @@ func acuBluetoothDisconnected(address *C.char) {
 	}
 }
 
+//export acuPowerReconfigure
+func acuPowerReconfigure() {
+	select {
+	case powerReconfigure <- struct{}{}:
+	default:
+	}
+}
+
 func InitMenu() error {
 	if C.acu_init_menu() == 0 {
 		return errors.New("menu initialization failed")
@@ -146,6 +155,10 @@ func SessionLockEvents() <-chan string {
 
 func BluetoothDisconnectEvents() <-chan string {
 	return bluetoothDisconnectEvents
+}
+
+func PowerReconfigureEvents() <-chan struct{} {
+	return powerReconfigure
 }
 
 func RunApp() {
@@ -334,8 +347,79 @@ func SavePowerSettings() bool {
 	return C.acu_save_power_settings() != 0
 }
 
+// SaveExternalPowerSettings dims external displays only, leaving the built-in
+// display untouched. Test-only.
+func SaveExternalPowerSettings() bool {
+	return C.acu_save_external_power_settings() != 0
+}
+
 func RestorePowerSettings() bool {
 	return C.acu_restore_power_settings() != 0
+}
+
+// RestorePersistedPowerSettings restores brightness recorded by a previous
+// process (Guardian killed, crash, restart) from persisted state.
+func RestorePersistedPowerSettings() bool {
+	return C.acu_restore_persisted_power_settings() != 0
+}
+
+// DDCChecksum computes the DDC/CI XOR checksum over data with the given base.
+func DDCChecksum(base uint8, data []byte) uint8 {
+	if len(data) == 0 {
+		return base
+	}
+	cdata := C.CBytes(data)
+	defer C.free(cdata)
+	return uint8(C.acu_ddc_checksum(C.uint8_t(base),
+		(*C.uint8_t)(cdata), C.uint32_t(len(data))))
+}
+
+// OnlineDisplayIDs returns the IDs of currently online displays.
+func OnlineDisplayIDs() []uint32 {
+	var ids [16]C.uint32_t
+	count := C.acu_online_display_ids(&ids[0], 16)
+	result := make([]uint32, int(count))
+	for i := range result {
+		result[i] = uint32(ids[i])
+	}
+	return result
+}
+
+func DisplayIsBuiltin(displayID uint32) bool {
+	return C.acu_display_is_builtin(C.uint32_t(displayID)) != 0
+}
+
+// DDCProbe reads the brightness (VCP 0x10, falling back to 0x83) of a display over DDC.
+// It does not change brightness.
+func DDCProbe(displayID uint32) (current uint16, maximum uint16, ok bool) {
+	var cCurrent C.uint16_t
+	var cMaximum C.uint16_t
+	result := C.acu_ddc_probe(C.uint32_t(displayID), &cCurrent, &cMaximum)
+	return uint16(cCurrent), uint16(cMaximum), result != 0
+}
+
+// DDCSetBrightness writes the brightness (VCP 0x10, falling back to 0x83) of a display over DDC.
+func DDCSetBrightness(displayID uint32, value uint16) bool {
+	return C.acu_ddc_set_brightness(C.uint32_t(displayID),
+		C.uint16_t(value)) != 0
+}
+
+// DMSupportsBrightness reports whether DisplayManagement can control the
+// display's brightness.
+func DMSupportsBrightness(displayID uint32) bool {
+	return C.acu_dm_supports(C.uint32_t(displayID)) != 0
+}
+
+// DMSetBrightness sets brightness via DisplayManagement (0..1).
+func DMSetBrightness(displayID uint32, value float32) bool {
+	return C.acu_dm_set(C.uint32_t(displayID), C.float(value)) != 0
+}
+
+// DMGetBrightness reads brightness via DisplayManagement (0..1).
+func DMGetBrightness(displayID uint32) (float32, bool) {
+	var v C.float
+	ok := C.acu_dm_get(C.uint32_t(displayID), &v)
+	return float32(v), ok != 0
 }
 
 // KeepAwakePersisted 返回防锁屏是否被用户持久化开启（跨进程重启保存）。
@@ -401,4 +485,12 @@ func SetBluetoothDisconnectWatch(address string) bool {
 //export acuLog
 func acuLog(level C.int, message *C.char) {
 	slog.Log(context.Background(), slog.Level(level), C.GoString(message), "component", "macos")
+}
+
+// GammaWhiteLevel reads the mean RGB output at the end of the gamma table.
+// Used by hardware smoke tests to check software dimming and restoration.
+func GammaWhiteLevel(displayID uint32) (float32, bool) {
+	var value C.float
+	ok := C.acu_gamma_white_level(C.uint32_t(displayID), &value)
+	return float32(value), ok != 0
 }

@@ -6,6 +6,7 @@
 #import <Carbon/Carbon.h>
 #import <ColorSync/ColorSync.h>
 #import <IOKit/hid/IOHIDManager.h>
+#import <IOKit/i2c/IOI2CInterface.h>
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <IOKit/graphics/IOGraphicsLib.h>
 #import <IOBluetooth/IOBluetooth.h>
@@ -260,8 +261,17 @@ static NSString *localized(NSString *key) {
                                                  table:nil];
 }
 
+static volatile bool gMainQueueDraining = false;
+
 static void on_main_sync(dispatch_block_t block) {
     if (pthread_main_np()) {
+        block();
+        return;
+    }
+    // When the main queue is not being drained (no CFRunLoop running, e.g.
+    // Go test binaries), dispatch_sync to the main queue would deadlock.
+    // Execute inline; ObjC reentrancy on the main queue is safe.
+    if (!gMainQueueDraining) {
         block();
         return;
     }
@@ -1002,6 +1012,7 @@ void acu_run_app(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        gMainQueueDraining = true;
         [NSApp run];
     }
 }
@@ -2651,6 +2662,16 @@ int acu_authenticate(void) {
 
 #define ACU_MAX_DISPLAYS 16
 
+// VESA MCCS VCP feature code for brightness.
+#define ACU_VCP_BRIGHTNESS 0x83
+#define ACU_VCP_LUMINANCE 0x10
+// DDC/CI I2C addresses (8-bit write / 8-bit read).
+#define ACU_DDC_WRITE_ADDRESS 0x6E
+#define ACU_DDC_READ_ADDRESS 0x6F
+// Apple Silicon DDC path: 7-bit address of the display, data address.
+#define ACU_ARM64_DDC_7BIT_ADDRESS 0x37
+#define ACU_ARM64_DDC_DATA_ADDRESS 0x51
+
 typedef bool (*ACUDisplayServicesCanChangeBrightness)(
     CGDirectDisplayID display);
 typedef int (*ACUDisplayServicesGetLinearBrightness)(
@@ -2660,22 +2681,64 @@ typedef int (*ACUDisplayServicesSetLinearBrightness)(
     CGDirectDisplayID display,
     float brightness);
 
+typedef CFTypeRef (*ACUAVServiceCreateWithService)(
+    CFAllocatorRef allocator,
+    io_service_t service);
+typedef int32_t (*ACUAVServiceWriteI2C)(
+    CFTypeRef service,
+    uint32_t packetAddress,
+    uint32_t dataAddress,
+    uint8_t const dataPacket[],
+    uint32_t packetLength);
+typedef int32_t (*ACUAVServiceReadI2C)(
+    CFTypeRef service,
+    uint32_t packetAddress,
+    uint32_t offset,
+    uint8_t dataPacket[],
+    uint32_t packetLength);
+typedef CFDictionaryRef (*ACUDisplayCreateInfoDictionary)(
+    CGDirectDisplayID display);
+typedef void (*ACUSServiceForDisplayNumber)(
+    uint32_t displayNumber,
+    io_service_t *service);
+
 typedef enum {
     ACUBrightnessBackendNone,
     ACUBrightnessBackendDisplayServicesLinear,
     ACUBrightnessBackendIODisplay,
+    ACUBrightnessBackendDDC,
+    ACUBrightnessBackendGamma,
 } ACUBrightnessBackend;
 
-static struct {
+typedef struct {
     CGDirectDisplayID display;
+    uint32_t vendor;
+    uint32_t product;
+    uint32_t serial;
     float brightness;
+    uint16_t ddc_current;
+    uint16_t ddc_max;
+    int ddc_arm64;
+    uint8_t ddc_vcp;
     ACUBrightnessBackend backend;
     int valid;
-} gDisplayBrightness[ACU_MAX_DISPLAYS];
+    uint32_t gamma_samples;
+    CGGammaValue *gamma_red;
+    CGGammaValue *gamma_green;
+    CGGammaValue *gamma_blue;
+} ACUDisplayEntry;
+
+static ACUDisplayEntry gDisplayBrightness[ACU_MAX_DISPLAYS];
 static pthread_mutex_t gBrightnessMutex = PTHREAD_MUTEX_INITIALIZER;
+static NSString *const ACUDimmedDisplaysKey = @"ACUDimmedDisplays";
 static ACUDisplayServicesCanChangeBrightness gCanChangeBrightness;
 static ACUDisplayServicesGetLinearBrightness gGetLinearBrightness;
 static ACUDisplayServicesSetLinearBrightness gSetLinearBrightness;
+static ACUAVServiceCreateWithService gAVServiceCreate;
+static ACUAVServiceWriteI2C gAVServiceWrite;
+static ACUAVServiceReadI2C gAVServiceRead;
+static ACUDisplayCreateInfoDictionary gDisplayCreateInfoDictionary;
+static ACUSServiceForDisplayNumber gSServiceForDisplayNumber;
 
 static void initialize_display_services(void) {
     static dispatch_once_t once;
@@ -2702,7 +2765,539 @@ static void initialize_display_services(void) {
           gGetLinearBrightness = NULL;
           gSetLinearBrightness = NULL;
       }
+
+      void *iokit = dlopen(
+          "/System/Library/Frameworks/IOKit.framework/IOKit",
+          RTLD_LAZY | RTLD_LOCAL);
+      if (iokit != NULL) {
+          gAVServiceCreate =
+              (ACUAVServiceCreateWithService)dlsym(
+                  iokit, "IOAVServiceCreateWithService");
+          gAVServiceWrite =
+              (ACUAVServiceWriteI2C)dlsym(iokit, "IOAVServiceWriteI2C");
+          gAVServiceRead =
+              (ACUAVServiceReadI2C)dlsym(iokit, "IOAVServiceReadI2C");
+          if (gAVServiceCreate == NULL || gAVServiceWrite == NULL ||
+              gAVServiceRead == NULL) {
+              gAVServiceCreate = NULL;
+              gAVServiceWrite = NULL;
+              gAVServiceRead = NULL;
+          }
+      }
+
+      void *coredisplay = dlopen(
+          "/System/Library/PrivateFrameworks/CoreDisplay.framework/"
+          "CoreDisplay",
+          RTLD_LAZY | RTLD_LOCAL);
+      gDisplayCreateInfoDictionary =
+          (ACUDisplayCreateInfoDictionary)dlsym(
+              coredisplay, "CoreDisplay_DisplayCreateInfoDictionary");
+      if (gDisplayCreateInfoDictionary == NULL) {
+          // The framework is part of the dyld shared cache and may have no
+          // on-disk path; search all loaded images as a fallback.
+          gDisplayCreateInfoDictionary =
+              (ACUDisplayCreateInfoDictionary)dlsym(
+                  RTLD_DEFAULT, "CoreDisplay_DisplayCreateInfoDictionary");
+      }
+
+      void *skylight = dlopen(
+          "/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight",
+          RTLD_LAZY | RTLD_LOCAL);
+      if (skylight != NULL) {
+          gSServiceForDisplayNumber =
+              (ACUSServiceForDisplayNumber)dlsym(
+                  skylight, "CGSServiceForDisplayNumber");
+      }
     });
+}
+
+static uint8_t ddc_checksum(uint8_t base, const uint8_t *data, size_t count) {
+    uint8_t result = base;
+    for (size_t i = 0; i < count; i++) {
+        result ^= data[i];
+    }
+    return result;
+}
+
+// Score how well an IORegistry display node (EDID UUID + registry path)
+// matches a CGDirectDisplayID. Mirrors the matching used by open-source
+// DDC tools: exact display-location match dominates, EDID UUID byte fields
+// (vendor, product, manufacture date, image size) add one point each.
+static int arm64_service_match_score(
+    CFDictionaryRef info,
+    NSString *edidUUID,
+    NSString *registryPath) {
+    int score = 0;
+    if (info == NULL) {
+        return 0;
+    }
+    if (registryPath.length > 0) {
+        CFTypeRef location = CFDictionaryGetValue(
+            info, CFSTR("IODisplayLocation"));
+        if (location != NULL &&
+            CFGetTypeID(location) == CFStringGetTypeID() &&
+            [(__bridge NSString *)location isEqualToString:registryPath]) {
+            score += 10;
+        }
+    }
+    if (edidUUID.length >= 16) {
+        CFTypeRef value = CFDictionaryGetValue(info, CFSTR("DisplayVendorID"));
+        if (value != NULL && CFGetTypeID(value) == CFNumberGetTypeID()) {
+            int64_t vendor = 0;
+            CFNumberGetValue((CFNumberRef)value, kCFNumberSInt64Type, &vendor);
+            NSString *key = [NSString stringWithFormat:@"%04X",
+                (uint16_t)(vendor & 0xFFFF)];
+            if ([key isEqualToString:
+                    [edidUUID substringWithRange:NSRangeFromString(
+                        @"0:4")]]) {
+                score += 1;
+            }
+        }
+        value = CFDictionaryGetValue(info, CFSTR("DisplayProductID"));
+        if (value != NULL && CFGetTypeID(value) == CFNumberGetTypeID()) {
+            int64_t product = 0;
+            CFNumberGetValue((CFNumberRef)value, kCFNumberSInt64Type, &product);
+            NSString *key = [NSString stringWithFormat:@"%02X%02X",
+                (uint8_t)(product & 0xFF),
+                (uint8_t)((product >> 8) & 0xFF)];
+            if ([key isEqualToString:
+                    [edidUUID substringWithRange:NSRangeFromString(@"4:4")]]) {
+                score += 1;
+            }
+        }
+        CFTypeRef week = CFDictionaryGetValue(
+            info, CFSTR("DisplayWeekOfManufacture"));
+        CFTypeRef year = CFDictionaryGetValue(
+            info, CFSTR("DisplayYearOfManufacture"));
+        if (week != NULL && year != NULL &&
+            CFGetTypeID(week) == CFNumberGetTypeID() &&
+            CFGetTypeID(year) == CFNumberGetTypeID()) {
+            int64_t weekValue = 0;
+            int64_t yearValue = 0;
+            CFNumberGetValue((CFNumberRef)week, kCFNumberSInt64Type, &weekValue);
+            CFNumberGetValue((CFNumberRef)year, kCFNumberSInt64Type, &yearValue);
+            NSString *key = [NSString stringWithFormat:@"%02X%02X",
+                (uint8_t)(weekValue & 0xFF),
+                (uint8_t)((yearValue - 1990) & 0xFF)];
+            if ([key isEqualToString:
+                    [edidUUID substringWithRange:NSRangeFromString(@"19:4")]]) {
+                score += 1;
+            }
+        }
+        CFTypeRef width = CFDictionaryGetValue(
+            info, CFSTR("DisplayHorizontalImageSize"));
+        CFTypeRef height = CFDictionaryGetValue(
+            info, CFSTR("DisplayVerticalImageSize"));
+        if (width != NULL && height != NULL &&
+            CFGetTypeID(width) == CFNumberGetTypeID() &&
+            CFGetTypeID(height) == CFNumberGetTypeID()) {
+            int64_t widthValue = 0;
+            int64_t heightValue = 0;
+            CFNumberGetValue(
+                (CFNumberRef)width, kCFNumberSInt64Type, &widthValue);
+            CFNumberGetValue(
+                (CFNumberRef)height, kCFNumberSInt64Type, &heightValue);
+            NSString *key = [NSString stringWithFormat:@"%02X%02X",
+                (uint8_t)((widthValue / 10) & 0xFF),
+                (uint8_t)((heightValue / 10) & 0xFF)];
+            if ([key isEqualToString:
+                    [edidUUID substringWithRange:NSRangeFromString(@"30:4")]]) {
+                score += 1;
+            }
+        }
+    }
+    return score;
+}
+
+// Apple Silicon exposes external display DDC through DCPAVServiceProxy
+// services in the IORegistry; pair each external proxy with the EDID node
+// that precedes it in the registry tree.
+static CFTypeRef arm64_av_service_for_display(CGDirectDisplayID display) {
+    if (gAVServiceCreate == NULL || gDisplayCreateInfoDictionary == NULL) {
+        return NULL;
+    }
+    CFDictionaryRef info = gDisplayCreateInfoDictionary(display);
+    if (info == NULL) {
+        return NULL;
+    }
+    CFTypeRef best = NULL;
+    int bestScore = -1;
+    BOOL ambiguous = NO;
+    uint32_t proxyCount = 0;
+    uint32_t externalCount = 0, onlineCount = 0;
+    CGDirectDisplayID online[ACU_MAX_DISPLAYS];
+    if (CGGetOnlineDisplayList(ACU_MAX_DISPLAYS, online, &onlineCount) == kCGErrorSuccess) {
+        for (uint32_t i = 0; i < onlineCount; i++)
+            if (!CGDisplayIsBuiltin(online[i])) externalCount++;
+    }
+    NSString *currentEDID = nil;
+    NSString *currentPath = nil;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    // kIOMasterPortDefault remains the compatible default for deployment
+    // targets below macOS 12.
+    io_registry_entry_t root = IORegistryGetRootEntry(kIOMasterPortDefault);
+#pragma clang diagnostic pop
+    io_iterator_t iterator = IO_OBJECT_NULL;
+    if (IORegistryEntryCreateIterator(
+            root, "IOService", kIORegistryIterateRecursively,
+            &iterator) == KERN_SUCCESS) {
+        io_object_t entry;
+        char name[128];
+        char path[512];
+        while ((entry = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
+            if (IORegistryEntryGetName(entry, name) == KERN_SUCCESS) {
+                NSString *nameString = [NSString stringWithUTF8String:name];
+                if ([nameString containsString:@"AppleCLCD2"]) {
+                    CFTypeRef edid = IORegistryEntryCreateCFProperty(
+                        entry, CFSTR("EDID UUID"),
+                        kCFAllocatorDefault, kIORegistryIterateRecursively);
+                    if (edid != NULL &&
+                        CFGetTypeID(edid) == CFStringGetTypeID()) {
+                        currentEDID = [(__bridge NSString *)edid copy];
+                    } else {
+                        currentEDID = nil;
+                    }
+                    if (edid != NULL) {
+                        CFRelease(edid);
+                    }
+                    if (IORegistryEntryGetPath(
+                            entry, kIOServicePlane, path) == KERN_SUCCESS) {
+                        currentPath = [NSString stringWithUTF8String:path];
+                    } else {
+                        currentPath = nil;
+                    }
+                } else if ([nameString containsString:@"DCPAVServiceProxy"]) {
+                    CFTypeRef location = IORegistryEntryCreateCFProperty(
+                        entry, CFSTR("Location"),
+                        kCFAllocatorDefault, kIORegistryIterateRecursively);
+                    if (location != NULL &&
+                        CFGetTypeID(location) == CFStringGetTypeID() &&
+                        [(__bridge NSString *)location
+                            isEqualToString:@"External"]) {
+                        CFTypeRef service = gAVServiceCreate(
+                            kCFAllocatorDefault, entry);
+                        int score = arm64_service_match_score(
+                            info, currentEDID, currentPath);
+                        if (service != NULL) proxyCount++;
+                        // Prefer identity matches; zero-score fallback is safe only
+                        // with exactly one external display and one service.
+                        if (service != NULL && score > bestScore) {
+                            if (best != NULL) CFRelease(best);
+                            best = service;
+                            bestScore = score;
+                            ambiguous = NO;
+                        } else {
+                            if (service != NULL && score > 0 && score == bestScore)
+                                ambiguous = YES;
+                            if (service != NULL) CFRelease(service);
+                        }
+                    }
+                    if (location != NULL) {
+                        CFRelease(location);
+                    }
+                }
+            }
+            IOObjectRelease(entry);
+        }
+        IOObjectRelease(iterator);
+    }
+    IOObjectRelease(root);
+    if (info != NULL) {
+        CFRelease(info);
+    }
+    if ((ambiguous || (bestScore == 0 &&
+            (externalCount != 1 || proxyCount != 1))) && best != NULL) {
+        CFRelease(best);
+        best = NULL;
+    }
+    return best;
+}
+
+// Intel path: map a display to its IOFramebuffer service, preferring the
+// SkyLight display service, falling back to vendor/product/serial/unit
+// matching over IOFramebuffer registry entries.
+static io_service_t intel_framebuffer_for_display(CGDirectDisplayID display) {
+    if (CGDisplayIsBuiltin(display)) {
+        return MACH_PORT_NULL;
+    }
+    if (gSServiceForDisplayNumber != NULL) {
+        io_service_t service = MACH_PORT_NULL;
+        gSServiceForDisplayNumber(display, &service);
+        if (service != MACH_PORT_NULL) {
+            IOItemCount count = 0;
+            if (IOFBGetI2CInterfaceCount(service, &count) == kIOReturnSuccess &&
+                count >= 1) {
+                return service;
+            }
+            IOObjectRelease(service);
+        }
+    }
+    io_iterator_t iterator = IO_OBJECT_NULL;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    int status = IOServiceGetMatchingServices(
+        kIOMasterPortDefault,
+        IOServiceMatching("IOFramebuffer"),
+        &iterator);
+#pragma clang diagnostic pop
+    if (status != KERN_SUCCESS) {
+        return MACH_PORT_NULL;
+    }
+    io_service_t result = MACH_PORT_NULL;
+    io_service_t port;
+    while ((port = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
+        CFDictionaryRef dict = IODisplayCreateInfoDictionary(
+            port, kIODisplayOnlyPreferredName);
+        if (dict != NULL) {
+            uint32_t vendor = 0;
+            uint32_t product = 0;
+            uint32_t serial = 0;
+            CFTypeRef value = CFDictionaryGetValue(
+                dict, CFSTR("DisplayVendorID"));
+            if (value != NULL && CFGetTypeID(value) == CFNumberGetTypeID()) {
+                int32_t number = 0;
+                CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &number);
+                vendor = (uint32_t)number;
+            }
+            value = CFDictionaryGetValue(dict, CFSTR("DisplayProductID"));
+            if (value != NULL && CFGetTypeID(value) == CFNumberGetTypeID()) {
+                int32_t number = 0;
+                CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &number);
+                product = (uint32_t)number;
+            }
+            value = CFDictionaryGetValue(dict, CFSTR("DisplaySerialNumber"));
+            if (value != NULL && CFGetTypeID(value) == CFNumberGetTypeID()) {
+                int32_t number = 0;
+                CFNumberGetValue((CFNumberRef)value, kCFNumberSInt32Type, &number);
+                serial = (uint32_t)number;
+            }
+            BOOL match = vendor == CGDisplayVendorNumber(display) &&
+                product == CGDisplayModelNumber(display) &&
+                serial == CGDisplaySerialNumber(display);
+            if (match) {
+                CFTypeRef location = CFDictionaryGetValue(
+                    dict, CFSTR("IODisplayLocation"));
+                if (location != NULL &&
+                    CFGetTypeID(location) == CFStringGetTypeID()) {
+                    NSString *text = (__bridge NSString *)location;
+                    NSRange at = [text rangeOfString:@"@"];
+                    NSString *unitText = nil;
+                    if (at.location != NSNotFound) {
+                        NSString *tail = [text substringFromIndex:
+                            at.location + 1];
+                        NSString *head = tail;
+                        NSRange next = [head rangeOfString:@"@"];
+                        if (next.location != NSNotFound) {
+                            head = [head substringToIndex:next.location];
+                        }
+                        unitText = head;
+                    }
+                    if (unitText != nil &&
+                        (uint32_t)[unitText integerValue] !=
+                            CGDisplayUnitNumber(display)) {
+                        match = NO;
+                    }
+                }
+            }
+            CFRelease(dict);
+            if (match) {
+                IOItemCount count = 0;
+                if (IOFBGetI2CInterfaceCount(port, &count) == kIOReturnSuccess &&
+                    count >= 1) {
+                    result = port;
+                    break;
+                }
+            }
+        }
+        IOObjectRelease(port);
+    }
+    IOObjectRelease(iterator);
+    return result;
+}
+
+static BOOL intel_ddc_write(io_service_t framebuffer, uint8_t command, uint16_t value) {
+    uint8_t data[7] = {
+        0x51, 0x84, 0x03, command,
+        (uint8_t)(value >> 8),
+        (uint8_t)(value & 0xFF),
+    };
+    data[6] = ddc_checksum(ACU_DDC_WRITE_ADDRESS, data, 6);
+    BOOL success = NO;
+    IOItemCount count = 0;
+    if (IOFBGetI2CInterfaceCount(framebuffer, &count) != kIOReturnSuccess) {
+        return NO;
+    }
+    for (IOOptionBits bus = 0; bus < count; bus++) {
+        io_service_t interface = MACH_PORT_NULL;
+        if (IOFBCopyI2CInterfaceForBus(framebuffer, bus, &interface) !=
+            kIOReturnSuccess) {
+            continue;
+        }
+        IOI2CConnectRef connect = NULL;
+        if (IOI2CInterfaceOpen(interface, kNilOptions, &connect) !=
+            kIOReturnSuccess) {
+            IOObjectRelease(interface);
+            continue;
+        }
+        IOObjectRelease(interface);
+        for (int cycle = 0; cycle < 2; cycle++) {
+            usleep(10000);
+            IOI2CRequest request;
+            memset(&request, 0, sizeof(request));
+            request.sendTransactionType = kIOI2CSimpleTransactionType;
+            request.sendAddress = ACU_DDC_WRITE_ADDRESS;
+            request.sendBuffer = (vm_address_t)&data[0];
+            request.sendBytes = 7;
+            request.replyTransactionType = kIOI2CNoTransactionType;
+            request.replyBytes = 0;
+            if (IOI2CSendRequest(connect, kNilOptions, &request) ==
+                    kIOReturnSuccess &&
+                request.result == kIOReturnSuccess) {
+                success = YES;
+                break;
+            }
+        }
+        IOI2CInterfaceClose(connect, kNilOptions);
+        if (success) {
+            break;
+        }
+    }
+    return success;
+}
+
+static BOOL intel_ddc_read(io_service_t framebuffer, uint8_t command, uint16_t *current, uint16_t *maximum) {
+    uint8_t data[5] = {0x51, 0x82, 0x01, command};
+    data[4] = ddc_checksum(ACU_DDC_WRITE_ADDRESS, data, 4);
+    uint8_t reply[11];
+    IOItemCount count = 0;
+    if (IOFBGetI2CInterfaceCount(framebuffer, &count) != kIOReturnSuccess) {
+        return NO;
+    }
+    for (IOOptionBits bus = 0; bus < count; bus++) {
+        io_service_t interface = MACH_PORT_NULL;
+        if (IOFBCopyI2CInterfaceForBus(framebuffer, bus, &interface) !=
+            kIOReturnSuccess) {
+            continue;
+        }
+        IOI2CConnectRef connect = NULL;
+        if (IOI2CInterfaceOpen(interface, kNilOptions, &connect) !=
+            kIOReturnSuccess) {
+            IOObjectRelease(interface);
+            continue;
+        }
+        IOObjectRelease(interface);
+        for (int attempt = 0; attempt < 3; attempt++) {
+            usleep(10000);
+            memset(reply, 0, sizeof(reply));
+            IOI2CRequest request;
+            memset(&request, 0, sizeof(request));
+            request.sendTransactionType = kIOI2CSimpleTransactionType;
+            request.sendAddress = ACU_DDC_WRITE_ADDRESS;
+            request.sendBuffer = (vm_address_t)&data[0];
+            request.sendBytes = 5;
+            request.minReplyDelay = 10;
+            request.replyAddress = ACU_DDC_READ_ADDRESS;
+            request.replySubAddress = 0x51;
+            request.replyTransactionType = kIOI2CDDCciReplyTransactionType;
+            request.replyBytes = sizeof(reply);
+            request.replyBuffer = (vm_address_t)&reply[0];
+            if (IOI2CSendRequest(connect, kNilOptions, &request) !=
+                    kIOReturnSuccess ||
+                request.result != kIOReturnSuccess) {
+                continue;
+            }
+            if (reply[10] != ddc_checksum(0x50, reply, 10)) {
+                continue;
+            }
+            if (reply[2] != 0x02) {
+                continue;
+            }
+            if (reply[3] != 0x00) {
+                // Feature not readable on this display.
+                IOI2CInterfaceClose(connect, kNilOptions);
+                return NO;
+            }
+            *maximum = (uint16_t)(reply[6] << 8) + reply[7];
+            *current = (uint16_t)(reply[8] << 8) + reply[9];
+            IOI2CInterfaceClose(connect, kNilOptions);
+            return YES;
+        }
+        IOI2CInterfaceClose(connect, kNilOptions);
+    }
+    return NO;
+}
+
+static BOOL arm64_ddc_write(CFTypeRef service, uint8_t command, uint16_t value) {
+    if (gAVServiceWrite == NULL) {
+        return NO;
+    }
+    uint8_t send[3] = {command, (uint8_t)(value >> 8), (uint8_t)(value & 0xFF)};
+    uint8_t packet[6];
+    packet[0] = (uint8_t)(0x80 | (3 + 1));
+    packet[1] = 3;
+    packet[2] = send[0];
+    packet[3] = send[1];
+    packet[4] = send[2];
+    packet[5] = ddc_checksum(
+        (ACU_ARM64_DDC_7BIT_ADDRESS << 1) ^ ACU_ARM64_DDC_DATA_ADDRESS,
+        packet, 5);
+    // IOAVService supplies the source address (0x51); send the complete
+    // length, Set VCP opcode, feature, value and checksum payload.
+    BOOL ok = NO;
+    for (int cycle = 0; cycle < 2; cycle++) {
+        usleep(10000);
+        if (gAVServiceWrite(
+                service, ACU_ARM64_DDC_7BIT_ADDRESS, ACU_ARM64_DDC_DATA_ADDRESS,
+                packet, sizeof(packet)) == 0) {
+            ok = YES;
+        }
+        usleep(20000);
+    }
+    return ok;
+}
+
+static BOOL arm64_ddc_read(CFTypeRef service, uint8_t command, uint16_t *current, uint16_t *maximum) {
+    if (gAVServiceWrite == NULL || gAVServiceRead == NULL) {
+        return NO;
+    }
+    uint8_t send[1] = {command};
+    uint8_t packet[4];
+    packet[0] = (uint8_t)(0x80 | (1 + 1));
+    packet[1] = 1;
+    packet[2] = send[0];
+    packet[3] = ddc_checksum(ACU_ARM64_DDC_7BIT_ADDRESS << 1, packet, 3);
+    // Re-send the read command before every read: a single write followed by
+    // repeated reads returns stale bus residue after the first reply.
+    for (int attempt = 0; attempt < 5; attempt++) {
+        for (int cycle = 0; cycle < 2; cycle++) {
+            usleep(10000);
+            gAVServiceWrite(
+                service, ACU_ARM64_DDC_7BIT_ADDRESS, ACU_ARM64_DDC_DATA_ADDRESS,
+                packet, 4);
+        }
+        usleep(50000);
+        uint8_t reply[12];
+        memset(reply, 0, sizeof(reply));
+        // The offset is echoed back as the reply length byte; m1ddc and
+        // BetterDisplay read with offset = input address (0x51). Using 0
+        // shifts the reply and corrupts the parsed max/current values.
+        if (gAVServiceRead(
+                service, ACU_ARM64_DDC_7BIT_ADDRESS,
+                ACU_ARM64_DDC_DATA_ADDRESS, reply,
+                sizeof(reply)) != 0) {
+            continue;
+        }
+        if (reply[0] != ACU_DDC_WRITE_ADDRESS || reply[2] != 0x02 ||
+            reply[3] != 0 || reply[4] != command ||
+            reply[10] != ddc_checksum(0x50, reply, 10)) {
+            continue;
+        }
+        *maximum = (uint16_t)(reply[6] << 8) + reply[7];
+        *current = (uint16_t)(reply[8] << 8) + reply[9];
+        return YES;
+    }
+    return NO;
 }
 
 static io_service_t io_display_service(CGDirectDisplayID display) {
@@ -2722,16 +3317,457 @@ static BOOL valid_brightness(float brightness) {
     return isfinite(brightness) && brightness >= 0.0f && brightness <= 1.0f;
 }
 
+static void release_display_entry(ACUDisplayEntry *entry) {
+    free(entry->gamma_red);
+    free(entry->gamma_green);
+    free(entry->gamma_blue);
+    entry->gamma_red = NULL;
+    entry->gamma_green = NULL;
+    entry->gamma_blue = NULL;
+    entry->gamma_samples = 0;
+    entry->valid = 0;
+    entry->display = 0;
+    entry->vendor = 0;
+    entry->product = 0;
+    entry->serial = 0;
+    entry->brightness = 0;
+    entry->ddc_current = 0;
+    entry->ddc_max = 0;
+    entry->ddc_arm64 = 0;
+    entry->backend = ACUBrightnessBackendNone;
+}
+
 static void clear_display_brightness(void) {
     for (uint32_t i = 0; i < ACU_MAX_DISPLAYS; i++) {
-        gDisplayBrightness[i].valid = 0;
-        gDisplayBrightness[i].display = 0;
-        gDisplayBrightness[i].brightness = 0;
-        gDisplayBrightness[i].backend = ACUBrightnessBackendNone;
+        release_display_entry(&gDisplayBrightness[i]);
     }
 }
 
-int acu_save_power_settings(void) {
+static void persist_dimmed_displays(void) {
+    NSMutableArray<NSDictionary *> *items = [NSMutableArray array];
+    for (uint32_t i = 0; i < ACU_MAX_DISPLAYS; i++) {
+        ACUDisplayEntry *entry = &gDisplayBrightness[i];
+        if (!entry->valid) {
+            continue;
+        }
+        NSMutableDictionary *item = [@{
+            @"v": @(entry->vendor),
+            @"p": @(entry->product),
+            @"s": @(entry->serial),
+            @"b": @(entry->backend),
+            @"br": @(entry->brightness),
+            @"dc": @(entry->ddc_current),
+            @"dm": @(entry->ddc_max),
+            @"a": @(entry->ddc_arm64),
+            @"vc": @(entry->ddc_vcp),
+        } mutableCopy];
+        if (entry->gamma_samples > 0) {
+            NSUInteger bytes = entry->gamma_samples * sizeof(CGGammaValue);
+            item[@"gr"] = [NSData dataWithBytes:entry->gamma_red length:bytes];
+            item[@"gg"] = [NSData dataWithBytes:entry->gamma_green length:bytes];
+            item[@"gb"] = [NSData dataWithBytes:entry->gamma_blue length:bytes];
+        }
+        [items addObject:item];
+    }
+    [[NSUserDefaults standardUserDefaults]
+        setObject:items forKey:ACUDimmedDisplaysKey];
+    // Checkpoint before touching hardware, including across process death.
+    [[NSUserDefaults standardUserDefaults] synchronize];
+}
+
+// Display IDs change on reconnection, so saved values are keyed by the
+// stable EDID identity (vendor, product, serial) and re-resolved on restore.
+static CGDirectDisplayID find_display_by_identity(
+    uint32_t vendor,
+    uint32_t product,
+    uint32_t serial) {
+    CGDirectDisplayID displays[ACU_MAX_DISPLAYS];
+    uint32_t count = 0;
+    if (CGGetOnlineDisplayList(
+            ACU_MAX_DISPLAYS, displays, &count) != kCGErrorSuccess) {
+        return 0;
+    }
+    CGDirectDisplayID match = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        if (CGDisplayVendorNumber(displays[i]) == vendor &&
+            CGDisplayModelNumber(displays[i]) == product &&
+            CGDisplaySerialNumber(displays[i]) == serial) {
+            if (match != 0) return 0; // Identical EDIDs cannot be resolved safely.
+            match = displays[i];
+        }
+    }
+    return match;
+}
+
+static BOOL ddc_restore_value(
+    int arm64,
+    uint8_t vcp,
+    CGDirectDisplayID display,
+    uint16_t saved,
+    uint16_t maximum) {
+    uint16_t current = 0;
+    uint16_t readMax = 0;
+    BOOL ok = NO;
+    if (arm64) {
+        CFTypeRef service = arm64_av_service_for_display(display);
+        if (service == NULL) {
+            return NO;
+        }
+        ok = arm64_ddc_write(service, vcp, saved) &&
+            arm64_ddc_read(service, vcp, &current, &readMax);
+        if (ok) {
+            int32_t delta = (int32_t)current - (int32_t)saved;
+            if (delta < 0) {
+                delta = -delta;
+            }
+            int32_t tolerance = maximum / 20;
+            if (tolerance < 2) {
+                tolerance = 2;
+            }
+            ok = delta <= tolerance;
+        }
+        CFRelease(service);
+        return ok;
+    }
+    io_service_t framebuffer = intel_framebuffer_for_display(display);
+    if (framebuffer == MACH_PORT_NULL) {
+        return NO;
+    }
+    ok = intel_ddc_write(framebuffer, vcp, saved) &&
+        intel_ddc_read(framebuffer, vcp, &current, &readMax);
+    if (ok) {
+        int32_t delta = (int32_t)current - (int32_t)saved;
+        if (delta < 0) {
+            delta = -delta;
+        }
+        int32_t tolerance = maximum / 20;
+        if (tolerance < 2) {
+            tolerance = 2;
+        }
+        ok = delta <= tolerance;
+    }
+    IOObjectRelease(framebuffer);
+    return ok;
+}
+
+// Restore one saved entry. Returns NO when the display is offline or the
+// write fails; the caller keeps the entry so a later reconnection (or the
+// next restore attempt) can finish the job.
+static BOOL restore_hardware_or_gamma_entry(ACUDisplayEntry *entry) {
+    CGDirectDisplayID display = find_display_by_identity(
+        entry->vendor, entry->product, entry->serial);
+    switch (entry->backend) {
+        case ACUBrightnessBackendDisplayServicesLinear:
+            if (display == 0 || gSetLinearBrightness == NULL) {
+                return NO;
+            }
+            return gSetLinearBrightness(
+                display, entry->brightness) == kIOReturnSuccess;
+        case ACUBrightnessBackendIODisplay: {
+            if (display == 0) {
+                return NO;
+            }
+            io_service_t service = io_display_service(display);
+            if (service == MACH_PORT_NULL) {
+                return NO;
+            }
+            int result = IODisplaySetFloatParameter(
+                service, 0, CFSTR("brightness"), entry->brightness);
+            IOObjectRelease(service);
+            return result == kIOReturnSuccess;
+        }
+        case ACUBrightnessBackendDDC:
+            if (display == 0) {
+                return NO;
+            }
+            return ddc_restore_value(
+                entry->ddc_arm64, entry->ddc_vcp, display,
+                entry->ddc_current, entry->ddc_max);
+        case ACUBrightnessBackendGamma:
+            if (display == 0 || entry->gamma_samples == 0) {
+                return NO;
+            }
+            return CGSetDisplayTransferByTable(
+                display, entry->gamma_samples,
+                entry->gamma_red, entry->gamma_green,
+                entry->gamma_blue) == kCGErrorSuccess;
+        default:
+            return NO;
+    }
+}
+
+// Both layers must restore successfully before dropping the recovery record.
+static BOOL restore_display_entry(ACUDisplayEntry *entry) {
+    BOOL gammaOK = YES;
+    if (entry->backend != ACUBrightnessBackendGamma && entry->gamma_samples > 0) {
+        CGDirectDisplayID display = find_display_by_identity(
+            entry->vendor, entry->product, entry->serial);
+        gammaOK = display != 0 && CGSetDisplayTransferByTable(
+            display, entry->gamma_samples, entry->gamma_red,
+            entry->gamma_green, entry->gamma_blue) == kCGErrorSuccess;
+    }
+    BOOL hardwareOK = restore_hardware_or_gamma_entry(entry);
+    return gammaOK && hardwareOK;
+}
+
+// Apply additional software dimming after hardware dimming. Preserve the
+// original curve in the same recovery record before changing the output.
+static BOOL dim_gamma_overlay(CGDirectDisplayID display, ACUDisplayEntry *entry) {
+    const uint32_t capacity = 256;
+    CGGammaValue *red = calloc(capacity, sizeof(CGGammaValue));
+    CGGammaValue *green = calloc(capacity, sizeof(CGGammaValue));
+    CGGammaValue *blue = calloc(capacity, sizeof(CGGammaValue));
+    uint32_t count = 0;
+    if (!red || !green || !blue ||
+        CGGetDisplayTransferByTable(display, capacity, red, green, blue, &count) != kCGErrorSuccess ||
+        count == 0 || count > capacity) {
+        free(red); free(green); free(blue);
+        return NO;
+    }
+    entry->gamma_samples = count;
+    entry->gamma_red = red;
+    entry->gamma_green = green;
+    entry->gamma_blue = blue;
+    persist_dimmed_displays();
+    CGGammaValue dimRed[256], dimGreen[256], dimBlue[256];
+    for (uint32_t i = 0; i < count; i++) {
+        dimRed[i] = red[i] * 0.20f;
+        dimGreen[i] = green[i] * 0.20f;
+        dimBlue[i] = blue[i] * 0.20f;
+    }
+    return CGSetDisplayTransferByTable(display, count, dimRed, dimGreen, dimBlue) == kCGErrorSuccess;
+}
+
+static void power_reconfiguration_callback(
+    CGDirectDisplayID display,
+    CGDisplayChangeSummaryFlags flags,
+    void *context) {
+    (void)context;
+    // Color/gamma and transaction-begin notifications are not hotplug events.
+    // In particular, our own dimming must not immediately trigger restoration.
+    CGDisplayChangeSummaryFlags relevant = kCGDisplayAddFlag | kCGDisplayRemoveFlag |
+        kCGDisplayEnabledFlag | kCGDisplayDisabledFlag | kCGDisplaySetModeFlag;
+    if ((flags & kCGDisplayBeginConfigurationFlag) || !(flags & relevant)) return;
+    acuLog(0, (char *)[NSString stringWithFormat:@"display reconfiguration display=0x%x flags=0x%x", display, flags].UTF8String);
+    acuPowerReconfigure();
+}
+
+static void register_power_reconfiguration_callback(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+      CGDisplayRegisterReconfigurationCallback(
+          power_reconfiguration_callback, NULL);
+    });
+}
+
+// Dim one display through the backend ladder. Returns YES when the display
+// was dimmed and its original value was saved.
+static BOOL dim_one_display(CGDirectDisplayID display, ACUDisplayEntry *entry) {
+    entry->vendor = CGDisplayVendorNumber(display);
+    entry->product = CGDisplayModelNumber(display);
+    entry->serial = CGDisplaySerialNumber(display);
+
+    // 1. DisplayServices linear brightness (built-in, Apple and
+    // system-recognized DDC displays).
+    float current = 0;
+    if (gCanChangeBrightness != NULL &&
+        gCanChangeBrightness(display)) {
+        // The regular brightness value is the user-slider domain and may
+        // exceed the current panel output while auto brightness is active.
+        int readResult = gGetLinearBrightness(display, &current);
+        if (readResult == kIOReturnSuccess &&
+            valid_brightness(current)) {
+            entry->display = display;
+            entry->brightness = current;
+            entry->backend = ACUBrightnessBackendDisplayServicesLinear;
+            entry->valid = 1;
+            persist_dimmed_displays();
+            int writeResult = gSetLinearBrightness(display, 0.0f);
+            if (writeResult == kIOReturnSuccess) {
+                entry->display = display;
+                entry->brightness = current;
+                entry->backend =
+                    ACUBrightnessBackendDisplayServicesLinear;
+                entry->valid = 1;
+                return YES;
+            }
+            acu_log_warning(
+                "acu: dim display 0x%x failed: %d\n",
+                display,
+                writeResult);
+            if (gSetLinearBrightness(display, current) != kIOReturnSuccess) return YES;
+            release_display_entry(entry);
+            entry->vendor = CGDisplayVendorNumber(display);
+            entry->product = CGDisplayModelNumber(display);
+            entry->serial = CGDisplaySerialNumber(display);
+            persist_dimmed_displays();
+        }
+    }
+
+    // 2. IODisplay registry brightness (legacy Intel drivers).
+    io_service_t service = io_display_service(display);
+    if (service != MACH_PORT_NULL) {
+        current = 0;
+        int readResult = IODisplayGetFloatParameter(
+            service, 0, CFSTR("brightness"), &current);
+        if (readResult == kIOReturnSuccess &&
+            valid_brightness(current)) {
+            entry->display = display;
+            entry->brightness = current;
+            entry->backend = ACUBrightnessBackendIODisplay;
+            entry->valid = 1;
+            persist_dimmed_displays();
+            int writeResult = IODisplaySetFloatParameter(
+                service, 0, CFSTR("brightness"), 0.0f);
+            if (writeResult == kIOReturnSuccess) {
+                entry->display = display;
+                entry->brightness = current;
+                entry->backend = ACUBrightnessBackendIODisplay;
+                entry->valid = 1;
+                IOObjectRelease(service);
+                return YES;
+            }
+            acu_log_warning(
+                "acu: dim display 0x%x via IODisplay failed: %d\n",
+                display,
+                writeResult);
+            int rollback = IODisplaySetFloatParameter(
+                service, 0, CFSTR("brightness"), current);
+            if (rollback != kIOReturnSuccess) {
+                IOObjectRelease(service);
+                return YES;
+            }
+            release_display_entry(entry);
+            entry->vendor = CGDisplayVendorNumber(display);
+            entry->product = CGDisplayModelNumber(display);
+            entry->serial = CGDisplaySerialNumber(display);
+            persist_dimmed_displays();
+        }
+        IOObjectRelease(service);
+    }
+
+    // 3. Raw DDC/CI. Only dim when the current value can be read AND the
+    // display honors the write (verified by reading back the target). Many displays
+    // support VCP 0x10 (Luminance) and not 0x83 (Brightness).
+    uint16_t ddcCurrent = 0;
+    uint16_t ddcMax = 0;
+    uint8_t ddcVcp = 0;
+    BOOL ddcDimmed = NO;
+    CFTypeRef avService = NULL;
+    io_service_t framebuffer = MACH_PORT_NULL;
+    if (gAVServiceCreate != NULL) {
+        avService = arm64_av_service_for_display(display);
+    }
+    if (avService == NULL) {
+        framebuffer = intel_framebuffer_for_display(display);
+    }
+    const uint8_t vcpCodes[2] = {ACU_VCP_LUMINANCE, ACU_VCP_BRIGHTNESS};
+    for (int v = 0; v < 2 && !ddcDimmed; v++) {
+        uint8_t vcp = vcpCodes[v];
+        uint16_t current = 0;
+        uint16_t maximum = 0;
+        BOOL readOk = avService != NULL
+            ? arm64_ddc_read(avService, vcp, &current, &maximum)
+            : intel_ddc_read(framebuffer, vcp, &current, &maximum);
+        if (!readOk) {
+            continue;
+        }
+        entry->display = display;
+        entry->backend = ACUBrightnessBackendDDC;
+        entry->ddc_current = current;
+        entry->ddc_max = maximum;
+        entry->ddc_vcp = vcp;
+        entry->ddc_arm64 = avService != NULL;
+        entry->valid = 1;
+        persist_dimmed_displays();
+        uint16_t target = 0;
+        BOOL writeOk = avService != NULL
+            ? arm64_ddc_write(avService, vcp, target)
+            : intel_ddc_write(framebuffer, vcp, target);
+        if (!writeOk) {
+            // A failed bus transaction may still have reached the display.
+            break;
+        }
+        uint16_t checkCurrent = 0;
+        uint16_t checkMax = 0;
+        BOOL verified = avService != NULL
+            ? arm64_ddc_read(avService, vcp, &checkCurrent, &checkMax)
+            : intel_ddc_read(framebuffer, vcp, &checkCurrent, &checkMax);
+        if (verified && checkCurrent == target) {
+            ddcDimmed = YES;
+            ddcVcp = vcp;
+            ddcCurrent = current;
+            ddcMax = maximum;
+            entry->ddc_arm64 = avService != NULL ? 1 : 0;
+        } else {
+            if (ddc_restore_value(entry->ddc_arm64, vcp, display, current, maximum)) {
+                entry->valid = 0;
+                persist_dimmed_displays();
+            } else {
+                break;
+            }
+        }
+    }
+    if (avService != NULL) {
+        CFRelease(avService);
+    }
+    if (framebuffer != MACH_PORT_NULL) {
+        IOObjectRelease(framebuffer);
+    }
+    if (!ddcDimmed && entry->valid) return YES;
+    if (ddcDimmed) {
+        entry->display = display;
+        entry->ddc_current = ddcCurrent;
+        entry->ddc_max = ddcMax;
+        entry->ddc_vcp = ddcVcp;
+        entry->backend = ACUBrightnessBackendDDC;
+        entry->valid = 1;
+        return YES;
+    }
+
+    // 4. Gamma table software dimming (DisplayLink, TVs, virtual
+    // screens, displays without DDC read support).
+    uint32_t capacity = 256;
+    uint32_t sampleCount = 0;
+    CGGammaValue *red = calloc(capacity, sizeof(CGGammaValue));
+    CGGammaValue *green = calloc(capacity, sizeof(CGGammaValue));
+    CGGammaValue *blue = calloc(capacity, sizeof(CGGammaValue));
+    BOOL gammaDimmed = NO;
+    if (red != NULL && green != NULL && blue != NULL &&
+        CGGetDisplayTransferByTable(
+            display, capacity, red, green, blue, &sampleCount) ==
+            kCGErrorSuccess &&
+        sampleCount > 0) {
+        entry->display = display;
+        entry->gamma_samples = sampleCount;
+        entry->gamma_red = red;
+        entry->gamma_green = green;
+        entry->gamma_blue = blue;
+        entry->backend = ACUBrightnessBackendGamma;
+        entry->valid = 1;
+        persist_dimmed_displays();
+        CGGammaValue dimRed[256], dimGreen[256], dimBlue[256];
+        for (uint32_t i = 0; i < sampleCount; i++) {
+            dimRed[i] = red[i] * 0.20f;
+            dimGreen[i] = green[i] * 0.20f;
+            dimBlue[i] = blue[i] * 0.20f;
+        }
+        gammaDimmed = CGSetDisplayTransferByTable(
+            display, sampleCount, dimRed, dimGreen, dimBlue) == kCGErrorSuccess;
+        if (!gammaDimmed) {
+            // Retain the original curve until restoration succeeds.
+            return YES;
+        }
+    }
+    if (!gammaDimmed) {
+        free(red);
+        free(green);
+        free(blue);
+    }
+    return gammaDimmed;
+}
+
+static BOOL dim_displays(bool external_only) {
     CGDirectDisplayID displays[ACU_MAX_DISPLAYS];
     uint32_t displayCount = 0;
     CGError listResult =
@@ -2740,90 +3776,69 @@ int acu_save_power_settings(void) {
         acu_log_warning(
                 "acu: list displays for dimming failed: %d\n",
                 listResult);
-        return 0;
+        return NO;
     }
     uint32_t count =
         displayCount > ACU_MAX_DISPLAYS ? ACU_MAX_DISPLAYS : displayCount;
 
+    initialize_display_services();
+    register_power_reconfiguration_callback();
+    BOOL saved = NO;
+    for (uint32_t i = 0; i < count; i++) {
+        CGDirectDisplayID display = displays[i];
+        if (external_only && CGDisplayIsBuiltin(display)) {
+            continue;
+        }
+        ACUDisplayEntry *entry = &gDisplayBrightness[i];
+        if (dim_one_display(display, entry)) {
+            if (entry->backend != ACUBrightnessBackendGamma &&
+                !dim_gamma_overlay(display, entry)) {
+                acu_log_warning("acu: additional gamma dimming failed for display 0x%x", display);
+            }
+            saved = YES;
+        }
+    }
+    return saved;
+}
+
+static int save_power_settings_impl(bool external_only) {
     pthread_mutex_lock(&gBrightnessMutex);
     if (gBrightnessSaved) {
         pthread_mutex_unlock(&gBrightnessMutex);
         return 1;
     }
-
-    clear_display_brightness();
-    BOOL saved = NO;
-    initialize_display_services();
-    for (uint32_t i = 0; i < count; i++) {
-        float current = 0;
-        ACUBrightnessBackend backend = ACUBrightnessBackendNone;
-
-        if (gCanChangeBrightness != NULL &&
-            gCanChangeBrightness(displays[i])) {
-            // The regular brightness value is the user-slider domain and may
-            // exceed the current panel output while auto brightness is active.
-            int readResult =
-                gGetLinearBrightness(displays[i], &current);
-            if (readResult == kIOReturnSuccess &&
-                valid_brightness(current)) {
-                int writeResult =
-                    gSetLinearBrightness(displays[i], 0.0f);
-                if (writeResult == kIOReturnSuccess) {
-                    backend = ACUBrightnessBackendDisplayServicesLinear;
-                } else {
-                    acu_log_warning(
-                        "acu: dim display 0x%x failed: %d\n",
-                        displays[i],
-                        writeResult);
-                    (void)gSetLinearBrightness(displays[i], current);
-                    continue;
-                }
-            }
+    // A new Guardian must not overwrite recovery data left by an older one.
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    NSArray *pending = [[NSUserDefaults standardUserDefaults]
+        objectForKey:ACUDimmedDisplaysKey];
+    if (pending.count > 0) {
+        pthread_mutex_unlock(&gBrightnessMutex);
+        if (!acu_restore_persisted_power_settings()) {
+            // Keep recovery active so input/reconfiguration retries it.
+            return 1;
         }
-
-        if (backend == ACUBrightnessBackendNone) {
-            io_service_t service = io_display_service(displays[i]);
-            if (service != MACH_PORT_NULL) {
-                int readResult = IODisplayGetFloatParameter(
-                    service, 0, CFSTR("brightness"), &current);
-                if (readResult == kIOReturnSuccess &&
-                    valid_brightness(current)) {
-                    int writeResult = IODisplaySetFloatParameter(
-                        service, 0, CFSTR("brightness"), 0.0f);
-                    if (writeResult == kIOReturnSuccess) {
-                        backend = ACUBrightnessBackendIODisplay;
-                    } else {
-                        acu_log_warning(
-                            "acu: dim display 0x%x via IODisplay "
-                            "failed: %d\n",
-                            displays[i],
-                            writeResult);
-                        (void)IODisplaySetFloatParameter(
-                            service,
-                            0,
-                            CFSTR("brightness"),
-                            current);
-                    }
-                }
-                IOObjectRelease(service);
-            }
-        }
-
-        if (backend == ACUBrightnessBackendNone) {
-            continue;
-        }
-        gDisplayBrightness[i].display = displays[i];
-        gDisplayBrightness[i].brightness = current;
-        gDisplayBrightness[i].backend = backend;
-        gDisplayBrightness[i].valid = 1;
-        saved = YES;
+        return save_power_settings_impl(external_only);
     }
+    clear_display_brightness();
+    BOOL saved = dim_displays(external_only);
     gBrightnessSaved = saved;
+    if (saved) {
+        persist_dimmed_displays();
+    }
     pthread_mutex_unlock(&gBrightnessMutex);
     if (saved) {
         set_shield_background_animation_enabled(NO);
     }
     return saved ? 1 : 0;
+}
+
+int acu_save_power_settings(void) {
+    return save_power_settings_impl(false);
+}
+
+// Test-only: dim external displays only, leaving the built-in display alone.
+int acu_save_external_power_settings(void) {
+    return save_power_settings_impl(true);
 }
 
 int acu_restore_power_settings(void) {
@@ -2835,46 +3850,223 @@ int acu_restore_power_settings(void) {
     BOOL restored = YES;
     initialize_display_services();
     for (uint32_t i = 0; i < ACU_MAX_DISPLAYS; i++) {
-        if (!gDisplayBrightness[i].valid) {
+        ACUDisplayEntry *entry = &gDisplayBrightness[i];
+        if (!entry->valid) {
             continue;
         }
-        int result = kIOReturnError;
-        if (gDisplayBrightness[i].backend ==
-                ACUBrightnessBackendDisplayServicesLinear &&
-            gSetLinearBrightness != NULL) {
-            result = gSetLinearBrightness(
-                gDisplayBrightness[i].display,
-                gDisplayBrightness[i].brightness);
-        } else if (gDisplayBrightness[i].backend ==
-                   ACUBrightnessBackendIODisplay) {
-            io_service_t service =
-                io_display_service(gDisplayBrightness[i].display);
-            if (service != MACH_PORT_NULL) {
-                result = IODisplaySetFloatParameter(
-                    service,
-                    0,
-                    CFSTR("brightness"),
-                    gDisplayBrightness[i].brightness);
-                IOObjectRelease(service);
-            }
+        if (restore_display_entry(entry)) {
+            release_display_entry(entry);
+            continue;
         }
-        if (result != kIOReturnSuccess) {
-            acu_log_warning(
-                    "acu: restore display 0x%x brightness failed: %d\n",
-                    gDisplayBrightness[i].display,
-                    result);
-            restored = NO;
-        }
+        acu_log_warning(
+            "acu: restore display 0x%x brightness failed\n",
+            entry->display);
+        restored = NO;
     }
+    persist_dimmed_displays();
     if (restored) {
         gBrightnessSaved = NO;
         clear_display_brightness();
+        [[NSUserDefaults standardUserDefaults]
+            removeObjectForKey:ACUDimmedDisplaysKey];
     }
     pthread_mutex_unlock(&gBrightnessMutex);
     if (restored) {
         set_shield_background_animation_enabled(YES);
     }
     return restored ? 1 : 0;
+}
+
+// Restore brightness recorded by a previous process (Guardian killed,
+// crash, restart), including saved gamma transfer tables.
+int acu_restore_persisted_power_settings(void) {
+    @autoreleasepool {
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        NSArray<NSDictionary *> *items =
+            [[NSUserDefaults standardUserDefaults]
+                objectForKey:ACUDimmedDisplaysKey];
+        if (items.count == 0) {
+            return 1;
+        }
+        pthread_mutex_lock(&gBrightnessMutex);
+        clear_display_brightness();
+        uint32_t index = 0;
+        for (NSDictionary *item in items) {
+            if (index >= ACU_MAX_DISPLAYS) {
+                break;
+            }
+            ACUDisplayEntry *entry = &gDisplayBrightness[index];
+            entry->backend =
+                (ACUBrightnessBackend)[item[@"b"] intValue];
+            entry->vendor = (uint32_t)[item[@"v"] intValue];
+            entry->product = (uint32_t)[item[@"p"] intValue];
+            entry->serial = (uint32_t)[item[@"s"] intValue];
+            entry->brightness = [item[@"br"] floatValue];
+            entry->ddc_current = (uint16_t)[item[@"dc"] intValue];
+            entry->ddc_max = (uint16_t)[item[@"dm"] intValue];
+            entry->ddc_arm64 = [item[@"a"] intValue];
+            entry->ddc_vcp = (uint8_t)[item[@"vc"] intValue];
+            if (entry->backend == ACUBrightnessBackendGamma || item[@"gr"] != nil) {
+                NSData *red = item[@"gr"], *green = item[@"gg"], *blue = item[@"gb"];
+                if (![red isKindOfClass:[NSData class]] ||
+                    ![green isKindOfClass:[NSData class]] ||
+                    ![blue isKindOfClass:[NSData class]] || red.length == 0 ||
+                    red.length % sizeof(CGGammaValue) != 0 ||
+                    red.length != green.length || red.length != blue.length) {
+                    continue;
+                }
+                entry->gamma_samples = (uint32_t)(red.length / sizeof(CGGammaValue));
+                entry->gamma_red = malloc(red.length);
+                entry->gamma_green = malloc(red.length);
+                entry->gamma_blue = malloc(red.length);
+                if (!entry->gamma_red || !entry->gamma_green || !entry->gamma_blue) {
+                    release_display_entry(entry);
+                    continue;
+                }
+                memcpy(entry->gamma_red, red.bytes, red.length);
+                memcpy(entry->gamma_green, green.bytes, red.length);
+                memcpy(entry->gamma_blue, blue.bytes, red.length);
+            }
+            entry->valid = 1;
+            index++;
+        }
+        gBrightnessSaved = index > 0;
+        BOOL restored = YES;
+        initialize_display_services();
+        for (uint32_t i = 0; i < index; i++) {
+            ACUDisplayEntry *entry = &gDisplayBrightness[i];
+            if (restore_display_entry(entry)) {
+                release_display_entry(entry);
+            } else {
+                restored = NO;
+            }
+        }
+        persist_dimmed_displays();
+        if (restored) {
+            gBrightnessSaved = NO;
+            clear_display_brightness();
+            [[NSUserDefaults standardUserDefaults]
+                removeObjectForKey:ACUDimmedDisplaysKey];
+        }
+        pthread_mutex_unlock(&gBrightnessMutex);
+        return restored ? 1 : 0;
+    }
+}
+
+// Test-only entry points for the DDC layer.
+uint8_t acu_ddc_checksum(uint8_t base, const uint8_t *data, uint32_t count) {
+    return ddc_checksum(base, data, count);
+}
+
+int acu_ddc_probe(uint32_t display_id, uint16_t *current, uint16_t *maximum) {
+    initialize_display_services();
+    if (gAVServiceCreate == NULL) {
+        return 0;
+    }
+    CFTypeRef service =
+        arm64_av_service_for_display((CGDirectDisplayID)display_id);
+    if (service == NULL) {
+        return 0;
+    }
+    const uint8_t vcpCodes[2] = {ACU_VCP_LUMINANCE, ACU_VCP_BRIGHTNESS};
+    BOOL ok = NO;
+    for (int v = 0; v < 2; v++) {
+        if (arm64_ddc_read(service, vcpCodes[v], current, maximum)) {
+            ok = YES;
+            break;
+        }
+    }
+    CFRelease(service);
+    return ok ? 1 : 0;
+}
+
+int acu_ddc_set_brightness(uint32_t display_id, uint16_t value) {
+    initialize_display_services();
+    if (gAVServiceCreate == NULL) {
+        return 0;
+    }
+    CFTypeRef service =
+        arm64_av_service_for_display((CGDirectDisplayID)display_id);
+    if (service == NULL) {
+        return 0;
+    }
+    uint16_t current = 0, maximum = 0;
+    BOOL ok = NO;
+    const uint8_t vcpCodes[2] = {ACU_VCP_LUMINANCE, ACU_VCP_BRIGHTNESS};
+    for (int v = 0; v < 2; v++) {
+        if (arm64_ddc_read(service, vcpCodes[v], &current, &maximum)) {
+            ok = arm64_ddc_write(service, vcpCodes[v], value);
+            break;
+        }
+    }
+    CFRelease(service);
+    return ok ? 1 : 0;
+}
+
+// DisplayManagement framework (Lunar's primary brightness backend).
+static void *gDMHandle = NULL;
+static bool (*DMGetDisplayBrightnessSupport)(uint32_t) = NULL;
+static int (*DMSetDisplayBrightness)(uint32_t, float) = NULL;
+static int (*DMGetDisplayBrightness)(uint32_t, float *) = NULL;
+
+static void initialize_display_management(void) {
+    if (gDMHandle != NULL) {
+        return;
+    }
+    gDMHandle = dlopen(
+        "/System/Library/Frameworks/DisplayManagement.framework/DisplayManagement",
+        RTLD_LAZY);
+    if (gDMHandle == NULL) {
+        return;
+    }
+    DMGetDisplayBrightnessSupport =
+        (bool (*)(uint32_t))dlsym(gDMHandle, "DMGetDisplayBrightnessSupport");
+    DMSetDisplayBrightness =
+        (int (*)(uint32_t, float))dlsym(gDMHandle, "DMSetDisplayBrightness");
+    DMGetDisplayBrightness =
+        (int (*)(uint32_t, float *))dlsym(gDMHandle, "DMGetDisplayBrightness");
+}
+
+int acu_dm_supports(uint32_t display_id) {
+    initialize_display_management();
+    if (DMGetDisplayBrightnessSupport == NULL) {
+        return 0;
+    }
+    return DMGetDisplayBrightnessSupport(display_id) ? 1 : 0;
+}
+
+int acu_dm_set(uint32_t display_id, float value) {
+    initialize_display_management();
+    if (DMSetDisplayBrightness == NULL) {
+        return 0;
+    }
+    return DMSetDisplayBrightness(display_id, value) == 0 ? 1 : 0;
+}
+
+int acu_dm_get(uint32_t display_id, float *value) {
+    initialize_display_management();
+    if (DMGetDisplayBrightness == NULL) {
+        return 0;
+    }
+    return DMGetDisplayBrightness(display_id, value) == 0 ? 1 : 0;
+}
+
+uint32_t acu_online_display_ids(uint32_t *ids, uint32_t max_count) {
+    CGDirectDisplayID displays[ACU_MAX_DISPLAYS];
+    uint32_t count = 0;
+    if (CGGetOnlineDisplayList(
+            ACU_MAX_DISPLAYS, displays, &count) != kCGErrorSuccess) {
+        return 0;
+    }
+    uint32_t limit = count < max_count ? count : max_count;
+    for (uint32_t i = 0; i < limit; i++) {
+        ids[i] = (uint32_t)displays[i];
+    }
+    return limit;
+}
+
+int acu_display_is_builtin(uint32_t display_id) {
+    return CGDisplayIsBuiltin((CGDirectDisplayID)display_id) ? 1 : 0;
 }
 
 int acu_keep_awake_persisted(void) {
@@ -3044,4 +4236,12 @@ int acu_set_bluetooth_disconnect_watch(const char *address) {
         });
         return registered ? 1 : 0;
     }
+}
+
+int acu_gamma_white_level(uint32_t display, float *value) {
+    CGGammaValue red[256], green[256], blue[256];
+    uint32_t count = 0;
+    if (CGGetDisplayTransferByTable(display, 256, red, green, blue, &count) != kCGErrorSuccess || count == 0 || count > 256) return 0;
+    *value = (red[count - 1] + green[count - 1] + blue[count - 1]) / 3.0f;
+    return 1;
 }

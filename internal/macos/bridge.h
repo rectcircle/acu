@@ -57,7 +57,18 @@ int acu_nudge_cursor(double distance, int restore_delay_ms, uint64_t marker);
 int acu_authenticate(void);
 
 int acu_save_power_settings(void);
+int acu_save_external_power_settings(void);
 int acu_restore_power_settings(void);
+int acu_restore_persisted_power_settings(void);
+uint8_t acu_ddc_checksum(uint8_t base, const uint8_t *data, uint32_t count);
+int acu_ddc_probe(uint32_t display_id, uint16_t *current, uint16_t *maximum);
+int acu_ddc_set_brightness(uint32_t display_id, uint16_t value);
+int acu_dm_supports(uint32_t display_id);
+int acu_dm_set(uint32_t display_id, float value);
+int acu_dm_get(uint32_t display_id, float *value);
+uint32_t acu_online_display_ids(uint32_t *ids, uint32_t max_count);
+int acu_display_is_builtin(uint32_t display_id);
+int acu_gamma_white_level(uint32_t display_id, float *value);
 
 int acu_keep_awake_persisted(void);
 void acu_set_keep_awake_persisted(int enabled);
@@ -78,5 +89,6 @@ void acuLidAngleChanged(void);
 void acuSessionLockEvent(char *source);
 void acuLog(int level, char *message);
 void acuBluetoothDisconnected(char *address);
+void acuPowerReconfigure(void);
 
 #endif

@@ -24,7 +24,7 @@ const (
 	messageActivity         = "activity"
 	modeProtection          = "protection"
 	modeKeepAwake           = "keep_awake"
-	testTimeoutSeconds      = 15
+	testTimeoutSeconds      = 30
 	idleTimeout             = 15 * time.Second
 	restoreAttempts         = 3
 	restoreRetryDelay       = 100 * time.Millisecond
@@ -149,15 +149,15 @@ func Run(conn *ipc.Conn, cfg config.Config) (runErr error) {
 		authResults := make(chan authenticationResult, 1)
 		previous := StateProtected
 		// 省电恢复：有物理操作 → 立即恢复显示器亮度。
-		// 事件经 channel 投递至本 goroutine 后恢复，RestorePowerSettings 为轻量 IOKit 调用
-		// 且幂等（gBrightnessSaved 哨兵 + C 侧 mutex），不会阻塞主循环。
-		restoreIfActive := func() {
+		// 事件经 channel 投递至本 goroutine 后串行恢复。DDC 读写含等待和重试，
+		// 多屏或设备无响应时可能延迟后续事件；失败时保留恢复记录。
+		restoreIfActive := func(reason string) {
 			if powerSaved {
 				powerSaved = !macos.RestorePowerSettings()
 				if powerSaved {
-					slog.Warn("display brightness restore failed")
+					slog.Warn("display brightness restore failed", "reason", reason)
 				} else {
-					slog.Info("display brightness restored")
+					slog.Info("display brightness restored", "reason", reason)
 				}
 			}
 		}
@@ -185,10 +185,15 @@ func Run(conn *ipc.Conn, cfg config.Config) (runErr error) {
 				enqueueAuthenticate(commands)
 			case <-macos.PhysicalActivityEvents():
 				lastActivity = time.Now()
-				restoreIfActive()
+				restoreIfActive("physical_input")
 			case <-macos.LidAngleChangedEvents():
 				lastActivity = time.Now()
-				restoreIfActive()
+				restoreIfActive("lid_angle")
+			case <-macos.PowerReconfigureEvents():
+				// Display connect/disconnect: restore first, the next
+				// idle cycle re-reads fresh values before re-dimming.
+				lastActivity = time.Now()
+				restoreIfActive("display_reconfiguration")
 			case next, ok := <-commandChannel:
 				if !ok {
 					commandChannel = nil
@@ -196,14 +201,14 @@ func Run(conn *ipc.Conn, cfg config.Config) (runErr error) {
 				}
 				if next == commandActivity {
 					lastActivity = time.Now()
-					restoreIfActive()
+					restoreIfActive("controller_activity")
 					continue
 				}
 				if next != commandAuthenticate {
 					continue
 				}
 				lastActivity = time.Now()
-				restoreIfActive()
+				restoreIfActive("authentication")
 				state := machine.State()
 				if state != StateProtected && state != StateDegraded {
 					continue
@@ -280,7 +285,7 @@ func Run(conn *ipc.Conn, cfg config.Config) (runErr error) {
 					return
 				}
 			case <-ticker.C:
-				// 省电：15 秒无物理操作 → 调低屏幕亮度到 0。
+				// 省电：15 秒无物理操作 → 硬件亮度调到 0，Gamma 输出缩放至 20%。
 				// 重检状态：测试模式超时 goroutine 可能在状态检查后、保存前执行 cleanup
 				// 并调暗屏幕，重检缩窄竞态窗口（残余窗口由 C 侧 mutex 保护快照原子性）
 				if machine.State() == StateProtected &&
@@ -315,6 +320,8 @@ func Run(conn *ipc.Conn, cfg config.Config) (runErr error) {
 						writeState(conn, StateDegraded)
 					}
 					continue
+				} else {
+					slog.Info("keep-awake cursor nudge posted", "displays_dimmed", powerSaved)
 				}
 				failures = 0
 			}

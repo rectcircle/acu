@@ -17,7 +17,7 @@
 "menu.lid_automation" = "Half-Closed Lid Auto Protection";
 "menu.lid_automation.sensor_unavailable" = "Half-Closed Lid Auto Protection (Sensor Unavailable)";
 "menu.lid_angle" = "Half-Closed Lid Trigger Angle";
-"menu.test_protection" = "Test Simulated Lock Screen (Stops After 15 Seconds)";
+"menu.test_protection" = "Test Simulated Lock Screen (Stops After 30 Seconds)";
 "menu.diagnostics" = "Permission Diagnostics";
 "menu.hotkey" = "Activation Shortcut";
 "menu.hotkey.registration_failed" = "Activation Shortcut (Registration Failed)";
@@ -35,7 +35,7 @@
 "state.preflighting_protection" = "Preflighting Simulated Lock Screen";
 "state.keep_awake_active" = "Preventing System Lock";
 "state.switching_to_protection" = "Switching to Simulated Lock Screen";
-"state.starting_test" = "Starting 15-Second Test";
+"state.starting_test" = "Starting 30-Second Test";
 "state.starting" = "Starting";
 "state.stopping_keep_awake" = "Stopping System Lock Prevention";
 "state.stop_keep_awake_failed" = "Failed to Stop System Lock Prevention";
@@ -46,7 +46,7 @@
 "state.protection_lost" = "Protection Lost";
 "state.keep_awake_lost" = "System Lock Prevention Lost";
 "state.keep_awake_error" = "System Lock Prevention Error";
-"state.test_active" = "Test Protection Active (Stops After 15 Seconds)";
+"state.test_active" = "Test Protection Active (Stops After 30 Seconds)";
 "state.keep_awake_restore_failed" = "Failed to Restore System Lock Prevention";
 "state.restoring_keep_awake" = "Restoring System Lock Prevention";
 "state.protected" = "Simulated Lock Screen Active";

@@ -119,9 +119,9 @@ export const copy = {
     setupB: "授予辅助功能权限",
     setupBText:
       "系统设置 → 隐私与安全性 → 辅助功能，启用 ACU 并重启。仅当权限诊断提示无法监听输入时，才额外开启输入监控。",
-    setupC: "先体验 15 秒测试",
+    setupC: "先体验 30 秒测试",
     setupCText:
-      "按住 Option 点击菜单栏图标，选择「测试模拟锁屏（15 秒自动退出）」。正式保护中，按 Enter 发起原生认证。",
+      "按住 Option 点击菜单栏图标，选择「测试模拟锁屏（30 秒自动退出）」。正式保护中，按 Enter 发起原生认证。",
     boundaryTitle: "保护的边界，始终清楚。",
     boundaryCopy:
       "ACU 是应用层模拟锁屏，不抵御进程终止、管理员权限或重启，不保证覆盖企业安全策略，也不能保证 Agent、电源与网络持续正常。检测到 macOS 真实锁屏后自动移除模拟保护，不会尝试解锁系统。",
@@ -260,9 +260,9 @@ export const copy = {
     setupB: "Grant Accessibility access",
     setupBText:
       "System Settings → Privacy & Security → Accessibility. Enable ACU and restart it. Grant Input Monitoring only if diagnostics reports that input events cannot be monitored.",
-    setupC: "Try the 15-second test first",
+    setupC: "Try the 30-second test first",
     setupCText:
-      "Hold Option while clicking the menu bar icon, then select “Test Simulated Lock Screen (Stops After 15 Seconds).” In regular protection, press Enter to open native authentication.",
+      "Hold Option while clicking the menu bar icon, then select “Test Simulated Lock Screen (Stops After 30 Seconds).” In regular protection, press Enter to open native authentication.",
     boundaryTitle: "Clear about what protection means.",
     boundaryCopy:
       "ACU is an application-level simulated lock. It does not resist process termination, administrator access, or restarts; guarantee enterprise policy compliance; or guarantee your agent, power, and network will stay available. When macOS really locks, ACU removes its shield and never attempts to unlock the system.",

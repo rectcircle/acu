@@ -5,6 +5,24 @@
 This file records notable changes to ACU. Every release includes both Chinese
 and English notes.
 
+## [0.1.9] - 2026-10-15
+
+### 新增与修复
+
+- 保护模式下，外接显示器支持 DDC/CI 硬件调暗，并在内外屏硬件亮度降至 0 后叠加 20% Gamma 输出；不支持硬件亮度控制时使用软件调暗。
+- 保存并恢复原始硬件亮度与 Gamma 曲线，增加进程异常退出后的持久化恢复、多屏匹配检查及显示器重配置处理。
+- DDC 写入和恢复增加读回验证，修复协议包和亮度命令不一致的问题；恢复失败时保留记录供后续重试。
+- 测试模拟锁屏改为 30 秒自动退出，便于验证 15 秒无操作后的调暗；增加亮度恢复来源与防锁屏模拟事件日志。
+- 增加手动硬件冒烟测试，覆盖硬件与 Gamma 调暗、恢复和强杀后的跨进程恢复；默认单测跳过硬件测试。
+
+### Added and Fixed
+
+- Support DDC/CI dimming on external monitors, combining hardware brightness 0 with 20% gamma output on built-in and external displays; use software dimming when hardware control is unavailable.
+- Persist and restore original hardware brightness and gamma curves, with recovery after process termination, safer display matching and display reconfiguration handling.
+- Verify DDC writes and restoration by reading values back, fix packet framing and mismatched brightness commands, and retain failed recovery records for retry.
+- Extend the simulated lock-screen test to 30 seconds so the 15-second idle dimming can be checked; log brightness restoration sources and keep-awake synthetic activity.
+- Add opt-in hardware smoke tests for combined dimming, restoration and recovery after a killed process; ordinary unit tests skip hardware checks.
+
 ## [0.1.8] - 2026-10-15
 
 ### 新增

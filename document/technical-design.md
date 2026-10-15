@@ -202,7 +202,7 @@ Awake/Degraded ── stop/controller EOF ──► Disarming ──► Disabled
 
 这样避免先遮罩、后发现没有输入拦截而使用户无法正常解除。
 
-首次验收可从菜单启动 15 秒测试模式。Controller 仅在 Guardian 启动握手中传递固定超时；
+首次验收可从菜单启动 30 秒测试模式。Controller 仅在 Guardian 启动握手中传递固定超时；
 Guardian 使用独立计时器，每秒更新全部 Shield Window 中的剩余时间，并在超时后停止 Event
 Tap、关闭全部 Shield Window 并退出。该计时不依赖 Controller 或认证回调，确保认证面板
 异常时仍能恢复。正式保护会话不传递超时，仍只能在原生认证成功后正常解除。
@@ -366,11 +366,29 @@ sharingType        = none
   不支持 Metal/SceneKit 生成式墙纸，此类墙纸回退纯黑。
 - 视频未缓存时立即显示扩展内置 HEIC 首帧，并用 `NSURLSessionDownloadTask` 下载到
   `Application Support/ACU/LockScreenBackgrounds`；完成后切换全部匹配屏幕。
-- 视频使用 `AVQueuePlayer + AVPlayerLooper` 播放；亮度降至 `0` 后暂停，恢复亮度时继续。
+- 视频使用 `AVQueuePlayer + AVPlayerLooper` 播放；进入省电调暗后暂停，恢复亮度时继续。
 - 产品名和状态文字每 60 秒在垂直方向移动 `12pt`，退出保护时销毁定时器。
 - Window 不成为 key/main window。
 - `ignoresMouseEvents = true`，让自动化客户端的合成事件命中底层目标应用。
 - 物理鼠标由 Event Tap 消费。
+
+显示器省电：
+
+- 正式保护态连续 15 秒无物理操作时，按 DisplayServices、IODisplay、DDC、Gamma
+  顺序尝试调暗。硬件亮度目标为 0；内屏使用
+  线性亮度 0。硬件调暗后再叠加 Gamma，将原始曲线输出缩放至 20%；
+  硬件不支持时仅使用 Gamma。两层的原始值一起持久化并恢复。Gamma 只改变画面输出，不保证降低硬件背光功耗。
+- 修改亮度前同步保存恢复记录；Gamma 原始 RGB 曲线也保存至持久化记录。
+  DDC 恢复需写入并读回验证，失败时保留记录，部分恢复成功后更新剩余记录。
+- 活动、显示器重配置及退出触发恢复；Controller 在启动和 Guardian 异常退出后
+  尝试跨进程恢复。未恢复的旧记录不得被下一次调暗覆盖。
+- DDC 服务优先按显示器身份匹配；只有一个外接屏和一个服务时允许无匹配分数的回退。
+  多屏无法唯一匹配或 EDID 身份重复时拒绝操作，避免写错屏幕。
+- 硬件验收命令（会短暂调暗外接屏）：
+  `ACU_SMOKE=1 go test -v -count=1 -timeout 60s -run 'TestDDCDimRestoreDemo|TestDDCProcessRecoverySmoke' ./internal/macos`。
+  前者检查硬件亮度与恢复值；后者强杀已调暗的测试子进程，再由另一进程恢复并读回验证。
+- 发布前仍需人工验收正式保护态的 15 秒超时、物理输入恢复、多屏独立亮度、
+  调暗时拔插、无 DDC 屏幕的 Gamma 恢复，以及 Intel/不同连接方式的兼容性。
 
 认证态：
 
