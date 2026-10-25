@@ -208,3 +208,5 @@ ACU writes INFO, WARN, and ERROR JSON records to `~/Library/Logs/ACU/acu.log`. C
 Release maintenance, Quark mirror setup and recovery steps are documented in the
 [release guide (Chinese)](document/releasing.md). Quark mirrors are populated only
 from public stable releases after explicit publication authorization.
+
+See [lid-closed operation](document/technical-design.md#67-合盖继续运行) for authorization scope, recovery limitations and validation.

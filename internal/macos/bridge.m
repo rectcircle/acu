@@ -37,6 +37,8 @@ static NSStatusItem *gStatusItem;
 static NSMenuItem *gStateItem;
 static NSMenuItem *gEnableMenuItem;
 static NSMenuItem *gKeepAwakeMenuItem;
+static NSMenuItem *gClamshellMenuItem;
+static NSMenuItem *gClamshellRootItem;
 static NSMenuItem *gLaunchAtLoginMenuItem;
 static NSMenuItem *gLidAutomationMenuItem;
 static NSMenuItem *gLidAngleRootItem;
@@ -79,6 +81,7 @@ static NSString *const ACUShieldVerticalConstraintIdentifier =
     @"ACUShieldVerticalConstraint";
 static NSString *const ACULidAutomationEnabledKey =
     @"ACULidAutomationEnabled";
+static NSString *const ACUClamshellEnabledKey = @"ACUClamshellEnabled";
 static NSString *const ACUKeepAwakeEnabledKey =
     @"ACUKeepAwakeEnabled";
 static NSString *const ACULidAngleThresholdKey =
@@ -538,6 +541,7 @@ static void update_bluetooth_presence_menu(void) {
     gBluetoothPresenceToggleItem.state =
         bluetooth_presence_enabled() ? NSControlStateValueOn
                                      : NSControlStateValueOff;
+    gBluetoothPresenceRootItem.state = gBluetoothPresenceToggleItem.state;
     gBluetoothPresenceToggleItem.enabled = configured;
     gBluetoothPresenceRootItem.title =
         configured && name.length > 0
@@ -634,6 +638,8 @@ static void show_launch_at_login_error(NSString *action, NSError *error) {
 @interface ACUMenuTarget : NSObject <NSMenuDelegate>
 - (void)enable:(id)sender;
 - (void)toggleKeepAwake:(id)sender;
+- (void)toggleClamshell:(id)sender;
+- (void)removeClamshell:(id)sender;
 - (void)toggleLaunchAtLogin:(id)sender;
 - (void)testProtection:(id)sender;
 - (void)diagnostics:(id)sender;
@@ -664,6 +670,12 @@ static void show_launch_at_login_error(NSString *action, NSError *error) {
 - (void)toggleKeepAwake:(id)sender {
     (void)sender;
     acuMenuAction(ACU_MENU_KEEP_AWAKE);
+}
+- (void)toggleClamshell:(id)sender {
+    acuMenuAction(ACU_MENU_CLAMSHELL);
+}
+- (void)removeClamshell:(id)sender {
+    acuMenuAction(ACU_MENU_CLAMSHELL_REMOVE);
 }
 - (void)toggleLaunchAtLogin:(id)sender {
     (void)sender;
@@ -827,6 +839,22 @@ int acu_init_menu(void) {
                                keyEquivalent:@""];
         gKeepAwakeMenuItem.target = gMenuTarget;
         [menu addItem:gKeepAwakeMenuItem];
+        gClamshellRootItem = [[NSMenuItem alloc]
+            initWithTitle:localized(@"menu.clamshell") action:nil keyEquivalent:@""];
+        NSMenu *clamshellMenu = [[NSMenu alloc] initWithTitle:localized(@"menu.clamshell")];
+        gClamshellRootItem.submenu = clamshellMenu;
+        [menu addItem:gClamshellRootItem];
+        gClamshellMenuItem = [[NSMenuItem alloc]
+            initWithTitle:localized(@"menu.clamshell.enable")
+            action:@selector(toggleClamshell:) keyEquivalent:@""];
+        gClamshellMenuItem.target = gMenuTarget;
+        [clamshellMenu addItem:gClamshellMenuItem];
+        NSMenuItem *removeClamshell = [[NSMenuItem alloc]
+            initWithTitle:localized(@"menu.clamshell.remove")
+            action:@selector(removeClamshell:) keyEquivalent:@""];
+        removeClamshell.target = gMenuTarget;
+        [clamshellMenu addItem:removeClamshell];
+
 
         gBluetoothPresenceRootItem = [[NSMenuItem alloc]
             initWithTitle:localized(@"menu.bluetooth_presence")
@@ -1001,7 +1029,6 @@ int acu_init_menu(void) {
         update_launch_at_login_menu();
         // 进程重启后立即恢复防锁屏的勾选状态（不必等子进程上报 awake）。
         if (acu_keep_awake_persisted()) {
-            gKeepAwakeMenuItem.title = localized(@"menu.keep_awake.stop");
             gKeepAwakeMenuItem.state = NSControlStateValueOn;
         }
         return 1;
@@ -1046,14 +1073,19 @@ void acu_set_menu_state(const char *state) {
 
 void acu_set_keep_awake_active(int active) {
     on_main_sync(^{
-      gKeepAwakeMenuItem.title = localized(
-          active ? @"menu.keep_awake.stop" : @"menu.keep_awake");
       gKeepAwakeMenuItem.state =
           active ? NSControlStateValueOn : NSControlStateValueOff;
     });
 }
 
-int acu_show_alert(const char *title, const char *message, int confirm) {
+void acu_set_clamshell_active(int active) {
+    on_main_sync(^{
+        gClamshellMenuItem.state = active ? NSControlStateValueOn : NSControlStateValueOff;
+        gClamshellRootItem.state = gClamshellMenuItem.state;
+    });
+}
+
+static int show_alert(const char *title, const char *message, int confirm, NSString *button) {
     if (title == NULL || message == NULL) {
         return 0;
     }
@@ -1064,7 +1096,7 @@ int acu_show_alert(const char *title, const char *message, int confirm) {
       NSAlert *alert = [NSAlert new];
       alert.messageText = alertTitle;
       alert.informativeText = alertMessage;
-      [alert addButtonWithTitle:localized(
+      [alert addButtonWithTitle:button ?: localized(
                                     confirm ? @"button.continue"
                                             : @"button.ok")];
       if (confirm) {
@@ -1073,6 +1105,15 @@ int acu_show_alert(const char *title, const char *message, int confirm) {
       response = [alert runModal];
     });
     return response == NSAlertFirstButtonReturn;
+}
+
+int acu_show_alert(const char *title, const char *message, int confirm) {
+    return show_alert(title, message, confirm, nil);
+}
+
+int acu_show_confirmation(const char *title, const char *message, const char *button) {
+    if (button == NULL) return 0;
+    return show_alert(title, message, 1, [NSString stringWithUTF8String:button]);
 }
 
 static BOOL permission_granted(uint32_t permission) {
@@ -4067,6 +4108,14 @@ uint32_t acu_online_display_ids(uint32_t *ids, uint32_t max_count) {
 
 int acu_display_is_builtin(uint32_t display_id) {
     return CGDisplayIsBuiltin((CGDirectDisplayID)display_id) ? 1 : 0;
+}
+
+int acu_clamshell_persisted(void) {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:ACUClamshellEnabledKey] ? 1 : 0;
+}
+
+void acu_set_clamshell_persisted(int enabled) {
+    [[NSUserDefaults standardUserDefaults] setBool:enabled != 0 forKey:ACUClamshellEnabledKey];
 }
 
 int acu_keep_awake_persisted(void) {

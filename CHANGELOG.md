@@ -5,6 +5,24 @@
 This file records notable changes to ACU. Every release includes both Chinese
 and English notes.
 
+## [0.1.10] - 2026-10-25
+
+### 新增与修复
+
+- 新增“合盖继续运行”子菜单，复用防锁屏活动；首次配置安装仅允许固定 on/off 操作的 root 包装脚本与当前用户 sudo 免密规则。
+- 管理员认证优先使用已配置的 sudo Touch ID，不可用时回退密码弹窗，不修改 PAM；修复移除授权后的重新配置判断和认证凭据衔接。
+- 首次配置展示简短授权说明，手动开启时单独提示电池运行与散热注意事项；启动自动恢复不重复提示。
+- 保存合盖运行偏好，退出时恢复原始电源设置但保留偏好，重启后自动恢复；手动关闭或移除授权后清除偏好，保留用户独立的防锁屏选择。
+- 合盖运行与蓝牙离开保护在主菜单同步勾选，开关文案固定，不再切换为“停止…”动作。
+
+### Added and Fixed
+
+- Add a lid-closed submenu backed by a root-owned wrapper and per-user sudo rules limited to exact on/off commands, reusing keep-awake activity.
+- Prefer configured sudo Touch ID with administrator-password fallback without modifying PAM; fix reauthorization detection and credential handoff.
+- Separate first-setup authorization from battery and ventilation reminders on each manual enable; automatic startup restoration shows no repeated reminder.
+- Persist lid-closed preferences, restore original power settings on exit, and resume automatically on launch. Manual stop or authorization removal clears the preference while preserving independent keep-awake settings.
+- Synchronize top-level checkmarks for lid-closed and Bluetooth departure protection, and keep toggle labels fixed.
+
 ## [0.1.9] - 2026-10-15
 
 ### 新增与修复

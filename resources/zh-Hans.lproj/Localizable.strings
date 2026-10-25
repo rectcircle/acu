@@ -1,9 +1,8 @@
 "menu.enable_protection" = "开启模拟锁屏";
 "menu.keep_awake" = "仅阻止系统锁屏";
-"menu.keep_awake.stop" = "停止阻止系统锁屏";
 "menu.bluetooth_presence" = "蓝牙离开自动模拟锁屏";
 "menu.bluetooth_presence.format" = "蓝牙离开自动模拟锁屏（%@）";
-"menu.bluetooth_presence.toggle" = "启用离开自动模拟锁屏";
+"menu.bluetooth_presence.toggle" = "离开自动模拟锁屏";
 "menu.bluetooth_presence.no_devices" = "没有已配对的蓝牙设备";
 "menu.bluetooth_presence.device_format" = "%@（%@）";
 "menu.bluetooth_presence.disabled" = "功能未启用";
@@ -21,7 +20,7 @@
 "menu.diagnostics" = "权限诊断";
 "menu.hotkey" = "开启快捷键";
 "menu.hotkey.registration_failed" = "开启快捷键（注册失败）";
-"menu.hotkey.disabled" = "关闭全局快捷键";
+"menu.hotkey.disabled" = "不使用全局快捷键";
 "menu.launch_at_login" = "登录后自动启动";
 "menu.launch_at_login.approval_required" = "登录后自动启动（需系统批准）";
 "menu.quit" = "退出";
@@ -107,3 +106,20 @@
 "shield.active" = "模拟锁屏保护中\n按 Enter 后使用 Touch ID 或系统密码认证";
 "auth.cancel" = "保持保护";
 "auth.reason" = "解除 ACU 模拟锁屏";
+
+"menu.clamshell" = "合盖继续运行";
+"menu.clamshell.remove" = "移除合盖运行授权…";
+"clamshell.title" = "开启合盖继续运行";
+"clamshell.error" = "合盖运行操作未完成";
+"clamshell.recovery" = "上次合盖运行设置尚未恢复。请使用“合盖继续运行”菜单重试恢复。";
+"clamshell.keep_required" = "合盖继续运行依赖防锁屏活动，请先停止合盖继续运行。";
+"clamshell.remove_confirm" = "将先恢复电源设置，再请求管理员认证移除当前用户的免密规则。共享的受限脚本会保留供其他用户使用。";
+"clamshell.reauthorize" = "授权缺失或已失效，请先通过合盖继续运行重新授权，或联系管理员检查 ACU sudoers 规则。";
+
+"menu.clamshell.enable" = "合盖继续运行";
+
+"clamshell.setup.title" = "首次配置合盖继续运行";
+"clamshell.setup.message" = "为支持合盖后继续运行，需要管理员授权来配置系统睡眠控制。请使用 Touch ID 或管理员密码完成认证。配置成功后，日常开关无需重复认证，ACU 不会保存你的密码。";
+"clamshell.setup.confirm" = "继续授权";
+"clamshell.enable.message" = "开启后，即使未接通电源，Mac 也会在合盖后继续运行并消耗电池。放入背包等封闭空间时，请注意散热，避免设备过热。";
+"clamshell.enable.confirm" = "开启";

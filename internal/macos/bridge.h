@@ -11,6 +11,8 @@ enum {
     ACU_MENU_KEEP_AWAKE = 5,
     ACU_MENU_LID_CONFIGURATION = 6,
     ACU_MENU_BLUETOOTH_CONFIGURATION = 7,
+    ACU_MENU_CLAMSHELL = 8,
+    ACU_MENU_CLAMSHELL_REMOVE = 9,
 };
 
 enum {
@@ -28,7 +30,9 @@ void acu_stop_app(void);
 char *acu_localized_string(const char *key);
 void acu_set_menu_state(const char *state);
 void acu_set_keep_awake_active(int active);
+void acu_set_clamshell_active(int active);
 int acu_show_alert(const char *title, const char *message, int confirm);
+int acu_show_confirmation(const char *title, const char *message, const char *button);
 void acu_show_preflight_alert(const char *title,
                               const char *message,
                               uint32_t failures);
@@ -70,6 +74,8 @@ uint32_t acu_online_display_ids(uint32_t *ids, uint32_t max_count);
 int acu_display_is_builtin(uint32_t display_id);
 int acu_gamma_white_level(uint32_t display_id, float *value);
 
+int acu_clamshell_persisted(void);
+void acu_set_clamshell_persisted(int enabled);
 int acu_keep_awake_persisted(void);
 void acu_set_keep_awake_persisted(int enabled);
 

@@ -171,3 +171,5 @@ CNAME 橙云代理接入步骤见 [落地页部署说明](document/website-deplo
 ## 日志
 
 ACU 将 INFO、WARN、ERROR 级别的 JSON 日志写入 `~/Library/Logs/ACU/acu.log`。Controller、Guardian 和原生桥接共用日志，每条记录包含时间、级别、进程角色和 PID。单文件上限 5 MiB，保留 3 个备份。日志不记录认证凭据或 IPC token；排障时可用 `tail -f ~/Library/Logs/ACU/acu.log` 观察锁屏通知、状态转换和清理结果。
+
+合盖继续运行的授权范围、恢复限制和验证步骤见 [使用说明](document/technical-design.md#67-合盖继续运行)。

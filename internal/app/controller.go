@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rectcircle/acu/internal/clamshell"
 	"github.com/rectcircle/acu/internal/ipc"
 	"github.com/rectcircle/acu/internal/macos"
 )
@@ -39,6 +40,10 @@ type childEvent struct {
 }
 
 type Controller struct {
+	clamshellActive                 bool
+	clamshellRecoveryPending        bool
+	clamshellStarting               bool
+	clamshellOwnedAwake             bool
 	child                           *guardianProcess
 	childEvents                     chan childEvent
 	quitWhenDisabled                bool
@@ -82,8 +87,13 @@ func Run() (runErr error) {
 	if !macos.RestorePersistedPowerSettings() {
 		slog.Warn("persisted dimmed displays not fully restored")
 	}
+	if clamshell.Pending() {
+		if err := clamshell.Set(false); err != nil {
+			macos.ShowAlert(text("clamshell.error"), text("clamshell.recovery")+"\n"+err.Error(), false)
+			controller.clamshellRecoveryPending = true
+		}
+	}
 	controller.updateBluetoothPresenceStatus(false, false)
-	go controller.loop()
 	// 进程重启后，若用户之前持久化开启了防锁屏，则自动恢复。
 	// 退出应用只停止本次运行，不清除用户偏好。
 	if macos.KeepAwakePersisted() {
@@ -96,6 +106,11 @@ func Run() (runErr error) {
 			controller.keepAwakeRequested = true
 		}
 	}
+	if macos.ClamshellPersisted() && !controller.clamshellRecoveryPending {
+		controller.startClamshell(false)
+	}
+	// Initialize all startup state before the event loop can process child events.
+	go controller.loop()
 	macos.RunApp()
 	return nil
 }
@@ -115,7 +130,15 @@ func (c *Controller) loop() {
 			case macos.MenuEnable:
 				c.enable(0)
 			case macos.MenuKeepAwake:
+				if c.clamshellActive {
+					c.clamshellError(fmt.Errorf("%s", text("clamshell.keep_required")))
+					break
+				}
 				c.toggleKeepAwake()
+			case macos.MenuClamshell:
+				c.toggleClamshell()
+			case macos.MenuClamshellRemove:
+				c.removeClamshell()
 			case macos.MenuTest:
 				c.enable(30)
 			case macos.MenuDiagnostics:
@@ -488,6 +511,9 @@ func (c *Controller) requestAuthentication() {
 
 func (c *Controller) quit() {
 	slog.Info("quit requested")
+	if !c.stopClamshell() {
+		return
+	}
 	c.keepAwakeRequested = false
 	if c.child == nil {
 		macos.StopApp()
@@ -545,6 +571,9 @@ func (c *Controller) handleChildEvent(event childEvent) {
 			slog.Info("guardian exited")
 		}
 		c.child = nil
+		if c.clamshellActive && event.child.mode == guardianModeKeepAwake && !c.pendingProtection {
+			c.stopClamshell()
+		}
 		if event.child.mode == guardianModeProtection {
 			c.lidAutomation.protectionStopped()
 		}
@@ -586,6 +615,11 @@ func (c *Controller) handleChildEvent(event childEvent) {
 	case "state":
 		slog.Info("guardian state received", "state", event.message.State)
 		if event.message.State == "awake" {
+			if c.clamshellActive && c.clamshellStarting {
+				c.clamshellStarting = false
+				macos.SetClamshellPersisted(true)
+				macos.SetClamshellActive(true)
+			}
 			macos.SetKeepAwakeActive(true)
 			macos.SetMenuState(text("state.keep_awake_active"))
 		} else if event.message.State == "degraded" &&
@@ -600,6 +634,9 @@ func (c *Controller) handleChildEvent(event childEvent) {
 			macos.SetMenuState(displayState(event.message.State))
 		}
 		if event.message.State == "disabled" {
+			if c.clamshellActive && event.child.mode == guardianModeKeepAwake && !c.pendingProtection {
+				c.stopClamshell()
+			}
 			if event.child.mode == guardianModeKeepAwake {
 				macos.SetKeepAwakeActive(false)
 			} else {
@@ -617,6 +654,9 @@ func (c *Controller) handleChildEvent(event childEvent) {
 			}
 		}
 	case "fatal":
+		if c.clamshellActive {
+			c.stopClamshell()
+		}
 		slog.Error("guardian reported fatal error", "code", event.message.Code)
 		event.child.fatalReported = true
 		macos.SetMenuState(text("state.start_failed"))

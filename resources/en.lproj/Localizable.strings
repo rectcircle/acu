@@ -1,9 +1,8 @@
 "menu.enable_protection" = "Enable Simulated Lock Screen";
 "menu.keep_awake" = "Prevent System Lock Only";
-"menu.keep_awake.stop" = "Stop Preventing System Lock";
 "menu.bluetooth_presence" = "Bluetooth Departure Lock";
 "menu.bluetooth_presence.format" = "Bluetooth Departure Lock (%@)";
-"menu.bluetooth_presence.toggle" = "Enable Lock on Departure";
+"menu.bluetooth_presence.toggle" = "Lock on Departure";
 "menu.bluetooth_presence.no_devices" = "No paired Bluetooth devices";
 "menu.bluetooth_presence.device_format" = "%@ (%@)";
 "menu.bluetooth_presence.disabled" = "Feature is disabled";
@@ -21,7 +20,7 @@
 "menu.diagnostics" = "Permission Diagnostics";
 "menu.hotkey" = "Activation Shortcut";
 "menu.hotkey.registration_failed" = "Activation Shortcut (Registration Failed)";
-"menu.hotkey.disabled" = "Disable Global Shortcut";
+"menu.hotkey.disabled" = "No Global Shortcut";
 "menu.launch_at_login" = "Launch at Login";
 "menu.launch_at_login.approval_required" = "Launch at Login (Approval Required)";
 "menu.quit" = "Quit";
@@ -107,3 +106,20 @@
 "shield.active" = "Simulated lock screen active\nPress Enter, then authenticate with Touch ID or your system password";
 "auth.cancel" = "Keep Protection";
 "auth.reason" = "Unlock ACU simulated lock screen";
+
+"menu.clamshell" = "Keep Running with Lid Closed";
+"menu.clamshell.remove" = "Remove Lid-Closed Authorization…";
+"clamshell.title" = "Keep Running with Lid Closed";
+"clamshell.error" = "Lid-Closed Operation Incomplete";
+"clamshell.recovery" = "The previous sleep setting has not been restored. Use the lid-closed menu to retry recovery.";
+"clamshell.keep_required" = "Lid-closed operation requires keep-awake activity. Stop lid-closed operation first.";
+"clamshell.remove_confirm" = "Restore the power setting, then authenticate to remove this user's passwordless rule. The restricted shared wrapper remains available to other users.";
+"clamshell.reauthorize" = "Authorization is missing or invalid. Reauthorize through the lid-closed menu, or ask an administrator to inspect ACU's sudoers rule.";
+
+"menu.clamshell.enable" = "Keep Running with Lid Closed";
+
+"clamshell.setup.title" = "Set Up Lid-Closed Operation";
+"clamshell.setup.message" = "Administrator authorization is needed to configure system sleep controls so your Mac can keep running with the lid closed. Authenticate with Touch ID or your administrator password. After setup, everyday toggles require no further authentication. ACU never stores your password.";
+"clamshell.setup.confirm" = "Continue to Authorization";
+"clamshell.enable.message" = "Your Mac will continue running and consuming battery with the lid closed, even when unplugged. In a backpack or other enclosed space, pay attention to ventilation to avoid overheating.";
+"clamshell.enable.confirm" = "Enable";

@@ -21,13 +21,15 @@ import (
 type MenuAction int
 
 const (
-	MenuEnable      MenuAction = C.ACU_MENU_ENABLE
-	MenuTest        MenuAction = C.ACU_MENU_TEST
-	MenuDiagnostics MenuAction = C.ACU_MENU_DIAGNOSTICS
-	MenuQuit        MenuAction = C.ACU_MENU_QUIT
-	MenuKeepAwake   MenuAction = C.ACU_MENU_KEEP_AWAKE
-	MenuLidConfig   MenuAction = C.ACU_MENU_LID_CONFIGURATION
-	MenuBluetooth   MenuAction = C.ACU_MENU_BLUETOOTH_CONFIGURATION
+	MenuEnable          MenuAction = C.ACU_MENU_ENABLE
+	MenuTest            MenuAction = C.ACU_MENU_TEST
+	MenuDiagnostics     MenuAction = C.ACU_MENU_DIAGNOSTICS
+	MenuQuit            MenuAction = C.ACU_MENU_QUIT
+	MenuKeepAwake       MenuAction = C.ACU_MENU_KEEP_AWAKE
+	MenuLidConfig       MenuAction = C.ACU_MENU_LID_CONFIGURATION
+	MenuBluetooth       MenuAction = C.ACU_MENU_BLUETOOTH_CONFIGURATION
+	MenuClamshell       MenuAction = C.ACU_MENU_CLAMSHELL
+	MenuClamshellRemove MenuAction = C.ACU_MENU_CLAMSHELL_REMOVE
 )
 
 type PreflightFailures uint32
@@ -493,4 +495,30 @@ func GammaWhiteLevel(displayID uint32) (float32, bool) {
 	var value C.float
 	ok := C.acu_gamma_white_level(C.uint32_t(displayID), &value)
 	return float32(value), ok != 0
+}
+
+func SetClamshellActive(active bool) {
+	var value C.int
+	if active {
+		value = 1
+	}
+	C.acu_set_clamshell_active(value)
+}
+
+// ShowConfirmation displays a confirmation with a specific affirmative button.
+func ShowConfirmation(title, message, button string) bool {
+	cTitle, cMessage, cButton := C.CString(title), C.CString(message), C.CString(button)
+	defer C.free(unsafe.Pointer(cTitle))
+	defer C.free(unsafe.Pointer(cMessage))
+	defer C.free(unsafe.Pointer(cButton))
+	return C.acu_show_confirmation(cTitle, cMessage, cButton) != 0
+}
+
+func ClamshellPersisted() bool { return C.acu_clamshell_persisted() != 0 }
+func SetClamshellPersisted(enabled bool) {
+	var value C.int
+	if enabled {
+		value = 1
+	}
+	C.acu_set_clamshell_persisted(value)
 }
