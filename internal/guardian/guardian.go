@@ -153,9 +153,13 @@ func Run(conn *ipc.Conn, cfg config.Config) (runErr error) {
 		// 多屏或设备无响应时可能延迟后续事件；失败时保留恢复记录。
 		restoreIfActive := func(reason string) {
 			if powerSaved {
-				powerSaved = !macos.RestorePowerSettings()
-				if powerSaved {
-					slog.Warn("display brightness restore failed", "reason", reason)
+				restored := macos.RestorePowerSettings()
+				// Activity ends this dimming cycle even when an offline display
+				// still has pending recovery. The native layer retains those
+				// records and retries them before the next idle dimming cycle.
+				powerSaved = false
+				if !restored {
+					slog.Warn("display brightness recovery pending; idle dimming reset", "reason", reason)
 				} else {
 					slog.Info("display brightness restored", "reason", reason)
 				}

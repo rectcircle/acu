@@ -5,6 +5,18 @@
 This file records notable changes to ACU. Every release includes both Chinese
 and English notes.
 
+## [0.1.12] - 2026-11-15
+
+### 修复
+
+- 修复模拟锁屏调暗后，调整合盖角度或其他活动唤亮屏幕时，旧显示器恢复失败导致后续闲置不再调暗的问题。
+- 活动后重置本轮调暗状态，静置 15 秒后可再次调暗；保留未完成的亮度恢复记录供后续重试。
+
+### Fixed
+
+- Fix idle dimming remaining disabled after lid movement or other activity restores screen brightness while an older display still has pending recovery.
+- Reset the dimming cycle on activity so displays can dim again after 15 seconds of inactivity, while retaining pending recovery records for later retries.
+
 ## [0.1.11] - 2026-11-15
 
 ### 新增与修复
