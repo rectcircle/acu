@@ -9,7 +9,8 @@
 "menu.bluetooth_presence.unavailable" = "Unable to read device connection state";
 "menu.bluetooth_presence.waiting" = "Waiting to reconnect after unlock";
 "menu.bluetooth_presence.armed" = "Armed: lock after 3 seconds disconnected";
-"menu.bluetooth_presence.connecting" = "Connecting or waiting for a stable Bluetooth connection";
+"menu.bluetooth_presence.connecting" = "Disconnected; connecting or waiting to retry";
+"menu.bluetooth_presence.stabilizing" = "Connected; confirming stability (5 seconds)";
 "menu.shield_background" = "Simulated Lock Screen Background";
 "menu.background.system" = "Current System Background (Generated Wallpapers Unsupported)";
 "menu.background.black" = "Black";

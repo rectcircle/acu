@@ -96,15 +96,26 @@ static NSMutableSet<NSString *> *gBluetoothConnectionsInFlight;
 static IOBluetoothUserNotification *gBluetoothDisconnectNotification;
 static NSString *gBluetoothDisconnectAddress;
 static id gBluetoothDisconnectObserver;
+static id gBluetoothConnectObserver;
+static IOBluetoothUserNotification *gBluetoothConnectNotification;
 
 @interface ACUBluetoothDisconnectObserver : NSObject
 @property(nonatomic, copy) NSString *address;
 - (instancetype)initWithAddress:(NSString *)address;
 - (void)deviceDisconnected:(IOBluetoothUserNotification *)notification
                 fromDevice:(IOBluetoothDevice *)device;
+- (void)deviceConnected:(IOBluetoothUserNotification *)notification
+             fromDevice:(IOBluetoothDevice *)device;
 @end
 
 @implementation ACUBluetoothDisconnectObserver
+- (void)deviceConnected:(IOBluetoothUserNotification *)notification
+             fromDevice:(IOBluetoothDevice *)device {
+    (void)notification;
+    if (device.addressString.length > 0) {
+        acuBluetoothConnectionChanged((char *)device.addressString.UTF8String);
+    }
+}
 - (instancetype)initWithAddress:(NSString *)address {
     self = [super init];
     if (self != nil) {
@@ -180,6 +191,7 @@ static void stop_session_lock_observer(void) {
     @synchronized(gBluetoothConnectionsInFlight) {
         [gBluetoothConnectionsInFlight removeObject:address];
     }
+    acuBluetoothConnectionChanged((char *)address.UTF8String);
 }
 @end
 
@@ -795,6 +807,13 @@ int acu_init_menu(void) {
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
         start_session_lock_observer();
+        gBluetoothConnectObserver = [ACUBluetoothDisconnectObserver new];
+        gBluetoothConnectNotification = [IOBluetoothDevice
+            registerForConnectNotifications:gBluetoothConnectObserver
+            selector:@selector(deviceConnected:fromDevice:)];
+        if (gBluetoothConnectNotification == nil) {
+            acu_log_warning("acu: Bluetooth connect notifications unavailable; polling fallback active");
+        }
 
         gMenuTarget = [ACUMenuTarget new];
         gStatusItem = [[NSStatusBar systemStatusBar]
@@ -2770,6 +2789,7 @@ typedef struct {
 } ACUDisplayEntry;
 
 static ACUDisplayEntry gDisplayBrightness[ACU_MAX_DISPLAYS];
+static BOOL gCurrentDisplaysDimmed;
 static pthread_mutex_t gBrightnessMutex = PTHREAD_MUTEX_INITIALIZER;
 static NSString *const ACUDimmedDisplaysKey = @"ACUDimmedDisplays";
 static ACUDisplayServicesCanChangeBrightness gCanChangeBrightness;
@@ -3379,6 +3399,7 @@ static void release_display_entry(ACUDisplayEntry *entry) {
 }
 
 static void clear_display_brightness(void) {
+    gCurrentDisplaysDimmed = NO;
     for (uint32_t i = 0; i < ACU_MAX_DISPLAYS; i++) {
         release_display_entry(&gDisplayBrightness[i]);
     }
@@ -3830,7 +3851,26 @@ static BOOL dim_displays(bool external_only) {
         if (external_only && CGDisplayIsBuiltin(display)) {
             continue;
         }
-        ACUDisplayEntry *entry = &gDisplayBrightness[i];
+        ACUDisplayEntry *entry = NULL;
+        BOOL pendingRestore = NO;
+        for (uint32_t j = 0; j < ACU_MAX_DISPLAYS; j++) {
+            ACUDisplayEntry *candidate = &gDisplayBrightness[j];
+            if (candidate->valid &&
+                candidate->vendor == CGDisplayVendorNumber(display) &&
+                candidate->product == CGDisplayModelNumber(display) &&
+                candidate->serial == CGDisplaySerialNumber(display)) {
+                pendingRestore = YES;
+            }
+            if (!candidate->valid && entry == NULL) {
+                entry = candidate;
+            }
+        }
+        // Preserve unresolved originals and avoid dimming the same screen twice.
+        if (pendingRestore || entry == NULL) {
+            acu_log_warning("acu: skipping dimming display 0x%x: pending recovery or no recovery slot",
+                            display);
+            continue;
+        }
         if (dim_one_display(display, entry)) {
             if (entry->backend != ACUBrightnessBackendGamma &&
                 !dim_gamma_overlay(display, entry)) {
@@ -3844,26 +3884,29 @@ static BOOL dim_displays(bool external_only) {
 
 static int save_power_settings_impl(bool external_only) {
     pthread_mutex_lock(&gBrightnessMutex);
-    if (gBrightnessSaved) {
+    if (gCurrentDisplaysDimmed) {
         pthread_mutex_unlock(&gBrightnessMutex);
         return 1;
     }
-    // A new Guardian must not overwrite recovery data left by an older one.
+    // Load and retry old recovery records before adding current displays.
+    // Failed records remain in their slots and must not block other screens.
     [[NSUserDefaults standardUserDefaults] synchronize];
     NSArray *pending = [[NSUserDefaults standardUserDefaults]
         objectForKey:ACUDimmedDisplaysKey];
     if (pending.count > 0) {
         pthread_mutex_unlock(&gBrightnessMutex);
-        if (!acu_restore_persisted_power_settings()) {
-            // Keep recovery active so input/reconfiguration retries it.
-            return 1;
+        BOOL restored = acu_restore_persisted_power_settings();
+        pthread_mutex_lock(&gBrightnessMutex);
+        if (!restored) {
+            acu_log_warning("acu: pending brightness recovery retained; dimming other displays");
         }
-        return save_power_settings_impl(external_only);
+    } else if (!gBrightnessSaved) {
+        clear_display_brightness();
     }
-    clear_display_brightness();
     BOOL saved = dim_displays(external_only);
-    gBrightnessSaved = saved;
-    if (saved) {
+    gCurrentDisplaysDimmed = saved;
+    gBrightnessSaved = gBrightnessSaved || saved;
+    if (gBrightnessSaved) {
         persist_dimmed_displays();
     }
     pthread_mutex_unlock(&gBrightnessMutex);
@@ -3884,6 +3927,7 @@ int acu_save_external_power_settings(void) {
 
 int acu_restore_power_settings(void) {
     pthread_mutex_lock(&gBrightnessMutex);
+    gCurrentDisplaysDimmed = NO;
     if (!gBrightnessSaved) {
         pthread_mutex_unlock(&gBrightnessMutex);
         return 1;

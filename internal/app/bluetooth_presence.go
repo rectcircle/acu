@@ -3,10 +3,10 @@ package app
 import "time"
 
 const (
-	bluetoothPresencePollInterval  = 3 * time.Second
+	bluetoothPresencePollInterval  = 60 * time.Second
 	bluetoothPresenceLostGrace     = 3 * time.Second
 	bluetoothPresenceReturnStable  = 5 * time.Second
-	bluetoothPresenceRetryInterval = 20 * time.Second
+	bluetoothPresenceRetryInterval = bluetoothPresencePollInterval
 )
 
 type bluetoothPresenceAction int
@@ -111,6 +111,9 @@ func (a *bluetoothPresenceAutomation) status(
 	}
 	if a.waitingForConnection && protectionActive {
 		return "waiting_for_return"
+	}
+	if connected && !a.armed {
+		return "stabilizing"
 	}
 	if a.waitingForConnection {
 		return "waiting_for_connection"

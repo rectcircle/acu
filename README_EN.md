@@ -131,10 +131,11 @@ compatible hinge-angle sensor. Hold `Option` while opening the menu and select
 
 "Bluetooth Departure Lock" can use a paired device as a presence probe. ACU
 initiates a connection when the feature is enabled or a device is selected,
-then retries every 20 seconds if needed. A stable connection arms protection;
+then retries during the 60-second fallback poll if needed. A stable connection arms protection;
 after a disconnect notification, ACU checks for recovery during a 3-second
 grace period before showing the simulated lock screen. After authentication,
-connection attempts resume and a stable connection rearms protection. The
+ACU immediately checks and resumes connection attempts. Connection notifications
+start a separate 5-second stability check before rearming protection. The
 device list is deduplicated by Bluetooth address and shows each address to
 distinguish devices with the same name. Connection and reconnection support
 depends on macOS and the Bluetooth device; ACU must remain running for this

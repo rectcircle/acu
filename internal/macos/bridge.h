@@ -95,6 +95,7 @@ void acuLidAngleChanged(void);
 void acuSessionLockEvent(char *source);
 void acuLog(int level, char *message);
 void acuBluetoothDisconnected(char *address);
+void acuBluetoothConnectionChanged(char *address);
 void acuPowerReconfigure(void);
 
 #endif

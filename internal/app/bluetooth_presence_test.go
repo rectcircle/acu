@@ -174,3 +174,29 @@ func TestBluetoothPresenceDisableClearsArmedState(t *testing.T) {
 		t.Fatalf("disable did not clear state: %+v", automation)
 	}
 }
+
+func TestBluetoothPresenceReturnStatusAndInterruptedStability(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	a := newBluetoothPresenceAutomation(true)
+	a.observe(now, true, true)
+	if got := a.status(true, true, true); got != "waiting_for_return" {
+		t.Fatalf("protected status = %q", got)
+	}
+	a.observe(now, true, false)
+	if got := a.status(true, true, false); got != "stabilizing" {
+		t.Fatalf("post-unlock status = %q", got)
+	}
+	a.observe(now.Add(4*time.Second), false, false)
+	if got := a.status(false, true, false); got != "waiting_for_connection" {
+		t.Fatalf("interrupted status = %q", got)
+	}
+	a.observe(now.Add(5*time.Second), true, false)
+	a.observe(now.Add(9*time.Second), true, false)
+	if a.armed {
+		t.Fatal("interrupted stability interval was counted toward arming")
+	}
+	a.observe(now.Add(10*time.Second), true, false)
+	if got := a.status(true, true, false); got != "armed" {
+		t.Fatalf("stable return status = %q", got)
+	}
+}

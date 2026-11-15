@@ -51,6 +51,7 @@ var (
 	lidAngleChanged           = make(chan struct{}, 1)
 	sessionLockEvents         = make(chan string, 4)
 	bluetoothDisconnectEvents = make(chan string, 8)
+	bluetoothConnectionEvents = make(chan string, 8)
 	powerReconfigure          = make(chan struct{}, 1)
 )
 
@@ -114,6 +115,21 @@ func acuBluetoothDisconnected(address *C.char) {
 	case bluetoothDisconnectEvents <- value:
 	default:
 	}
+}
+
+//export acuBluetoothConnectionChanged
+func acuBluetoothConnectionChanged(address *C.char) {
+	if address == nil {
+		return
+	}
+	select {
+	case bluetoothConnectionEvents <- C.GoString(address):
+	default:
+	}
+}
+
+func BluetoothConnectionEvents() <-chan string {
+	return bluetoothConnectionEvents
 }
 
 //export acuPowerReconfigure

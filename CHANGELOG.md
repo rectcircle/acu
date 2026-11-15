@@ -5,6 +5,20 @@
 This file records notable changes to ACU. Every release includes both Chinese
 and English notes.
 
+## [0.1.11] - 2026-11-15
+
+### 新增与修复
+
+- 蓝牙连接状态每 60 秒轮询，避免漏发断开通知后持续显示已布防；发现断开后通过独立的 3 秒计时复查连接。
+- 解锁完成立即检查并尝试重连，连接事件立即驱动独立的 5 秒稳定确认；60 秒轮询用于兜底及失败重试，并区分未连接与确认稳定的菜单状态。
+- 保留旧显示器的亮度恢复记录，同时允许其他当前屏幕继续调暗；修复旧记录恢复失败时跳过调暗却误报成功的问题。
+
+### Added and Fixed
+
+- Poll Bluetooth connections every 60 seconds to detect missed disconnect notifications, with a separate 3-second grace check after detecting disconnection.
+- Immediately check and reconnect after protection ends, handle connection events with a separate 5-second stability check, and distinguish disconnected and stabilizing menu states. Keep 60-second polling for fallback and retries.
+- Preserve pending brightness recovery records while allowing other current displays to dim, and stop reporting successful dimming when old recovery fails.
+
 ## [0.1.10] - 2026-10-25
 
 ### 新增与修复
