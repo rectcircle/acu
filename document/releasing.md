@@ -67,12 +67,14 @@ python3 scripts/quark-release.py dispatch v0.1.8
 
 4. 用 `gh run list --workflow release.yml` 找到运行，再 `gh run watch <运行ID> --exit-status`。
    检查 publish、update-cask、mirror-quark 三部分，不能仅以 GitHub 已公开判断全部完成。
-   夸克日志需有四项文件校验及最终 `Verified mirror:`，并通过分享链接确认版本目录可见。
+   夸克日志需有对应镜像文件校验（v0.1.12 起为两项，此前为四项）及最终 `Verified mirror:`，并通过分享链接确认版本目录可见。
 
 ## 镜像与恢复
 
 镜像只接受已公开的正式版本。下载全部四资产并校验后，上传到未分享的
 `/releases/acu-staging/vX.Y.Z/`，从夸克回读每个文件并核对 SHA-256，全部通过后移动到 `acu`。
+从 v0.1.12 起，仅将已验证的 DMG 和对应 SHA-256 文件上传夸克；GitHub 保留完整四资产。
+v0.1.11 及更早版本恢复时保留原四文件清单，公开目录保持只读。
 任务串行执行所有 ACU 版本，runner 使用临时授权目录，结束后清理；不回写刷新后的凭据。
 CLI 能刷新令牌，但不承诺长期无人值守；本地授权失效需人工重新登录。
 

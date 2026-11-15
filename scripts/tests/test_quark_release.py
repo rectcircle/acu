@@ -287,3 +287,18 @@ class AuthorizationTest(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+
+class MirrorSelectionTest(unittest.TestCase):
+    def test_new_versions_upload_only_dmg_and_checksum(self):
+        names = ['ACU-0.1.12-macos-universal' + suffix
+                 for suffix in ('.dmg', '.dmg.sha256', '.tar.gz', '.tar.gz.sha256')]
+        sources = {name: Path(name) for name in names}
+        self.assertEqual(set(mirror.mirror_sources('v0.1.12', sources)),
+                         set(names[:2]))
+        self.assertEqual(len(sources), 4)
+
+    def test_old_versions_keep_existing_inventory(self):
+        sources = {suffix: Path(suffix)
+                   for suffix in ('.dmg', '.dmg.sha256', '.tar.gz', '.tar.gz.sha256')}
+        self.assertEqual(mirror.mirror_sources('v0.1.11', sources), sources)

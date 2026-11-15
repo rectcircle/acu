@@ -236,6 +236,16 @@ def verify(tag, repo, output, draft=False):
     return sources
 
 
+
+def mirror_sources(tag, sources):
+    # Preserve the inventory of previously published mirrors during recovery.
+    version = tuple(map(int, version_from_tag(tag).split('.')))
+    if version < (0, 1, 12):
+        return sources
+    return {name: path for name, path in sources.items()
+            if name.endswith(('.dmg', '.dmg.sha256'))}
+
+
 def mirror(tag, repo):
     release = release_info(tag, repo)
     parent = os.environ.get('QUARK_ACU_FID', '')
@@ -249,7 +259,7 @@ def mirror(tag, repo):
         sources_dir.mkdir()
         output.mkdir()
         gh('release', 'download', tag, '--repo', repo, '--dir', str(sources_dir))
-        sources = inventory(sources_dir, tag, release)
+        sources = mirror_sources(tag, inventory(sources_dir, tag, release))
         entry = install_cli(root / 'runtime')
         write_auth(root / 'runtime/codex/config.json', auth)
         quark = Quark(entry, root / 'work')
